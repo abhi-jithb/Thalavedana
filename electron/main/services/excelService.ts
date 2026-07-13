@@ -40,6 +40,34 @@ function colLetterToIndex(letter: string): number {
   return column - 1;
 }
 
+// Helper to parse sheets-specific errors for helpful UI messages
+function parseSheetsError(err: any): string {
+  console.error("RAW GOOGLE SHEETS ERROR:", err);
+  const msg = err.message || String(err);
+  const settings = getSettings();
+  const email = settings.gmailUserEmail || 'your logged-in account';
+  
+  if (msg.includes('Insufficient Permission') || msg.toLowerCase().includes('insufficient permission') || msg.toLowerCase().includes('scope')) {
+    return `Access denied. The Google account (${email}) does not have Google Sheets permissions. Please click "Authorize Google Sheets Access" to re-authenticate and make sure you check the Google Sheets permissions checkbox on the consent screen.`;
+  }
+  if (msg.includes('caller does not have permission') || msg.toLowerCase().includes('permission') || err.status === 403) {
+    return `Access denied. The authenticated Google account (${email}) does not have permission to view or edit this spreadsheet. Please make sure the spreadsheet is shared with ${email} (with Editor/Writer access) or use a different spreadsheet.`;
+  }
+  if (err.status === 404 || msg.includes('not found') || msg.includes('Requested entity was not found')) {
+    return 'Spreadsheet not found. Please verify the URL or Spreadsheet ID.';
+  }
+  if (msg.includes('token expired') || msg.includes('invalid_grant')) {
+    return 'Google login session expired. Please re-authenticate your Google account.';
+  }
+  if (msg.includes('ENOTFOUND') || msg.includes('fetch') || msg.includes('network')) {
+    return 'Network unavailable. Please check your internet connection.';
+  }
+  if (err.status === 429 || msg.includes('quota')) {
+    return 'Google Sheets API rate limit exceeded. Please try again in a few minutes.';
+  }
+  return msg;
+}
+
 export async function appendReportToExcel({
   dateStr,
   reportContent,
@@ -145,18 +173,7 @@ export async function appendReportToExcel({
 
     logToDb('INFO', 'EXCEL', `Google Sheet updated successfully at row ${nextRowNumber}`);
   } catch (err: any) {
-    let msg = err.message || String(err);
-    if (err.status === 403 || msg.includes('Permission') || msg.includes('scope')) {
-      msg = 'Access denied. Please re-authenticate your Google account to grant Google Sheets permissions.';
-    } else if (err.status === 404 || msg.includes('not found') || msg.includes('Requested entity was not found')) {
-      msg = 'Spreadsheet not found. Please verify the URL or Spreadsheet ID.';
-    } else if (msg.includes('token expired') || msg.includes('invalid_grant')) {
-      msg = 'Google login session expired. Please re-authenticate your Google account.';
-    } else if (msg.includes('ENOTFOUND') || msg.includes('fetch') || msg.includes('network')) {
-      msg = 'Network unavailable. Please check your internet connection.';
-    } else if (err.status === 429 || msg.includes('quota')) {
-      msg = 'Google Sheets API rate limit exceeded. Please try again in a few minutes.';
-    }
+    const msg = parseSheetsError(err);
     logToDb('ERROR', 'EXCEL', `Google Sheets error: ${msg}`);
     throw new Error(msg);
   }
@@ -211,18 +228,7 @@ export async function getExcelMeta(spreadsheetUrlOrId: string): Promise<{ sheets
 
     return { sheets: sheetsList, columnsPreview };
   } catch (err: any) {
-    let msg = err.message || String(err);
-    if (err.status === 403 || msg.includes('Permission') || msg.includes('scope')) {
-      msg = 'Access denied. Please re-authenticate your Google account to grant Google Sheets permissions.';
-    } else if (err.status === 404 || msg.includes('not found') || msg.includes('Requested entity was not found')) {
-      msg = 'Spreadsheet not found. Please verify the URL or Spreadsheet ID.';
-    } else if (msg.includes('token expired') || msg.includes('invalid_grant')) {
-      msg = 'Google login session expired. Please re-authenticate your Google account.';
-    } else if (msg.includes('ENOTFOUND') || msg.includes('fetch') || msg.includes('network')) {
-      msg = 'Network unavailable. Please check your internet connection.';
-    } else if (err.status === 429 || msg.includes('quota')) {
-      msg = 'Google Sheets API rate limit exceeded. Please try again in a few minutes.';
-    }
+    const msg = parseSheetsError(err);
     logToDb('ERROR', 'EXCEL', `Google Sheets error: ${msg}`);
     throw new Error(msg);
   }
