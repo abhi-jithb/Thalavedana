@@ -1,6 +1,6 @@
 import { google } from 'googleapis';
 import { getSettings, logToDb } from '../database';
-import { getOAuth2Client } from './gmailService';
+import { getAuthenticatedClient } from './gmailService';
 
 export interface ColumnMapping {
   col: string; // "A", "B", "C", etc.
@@ -43,29 +43,38 @@ function colLetterToIndex(letter: string): number {
 // Helper to parse sheets-specific errors for helpful UI messages
 function parseSheetsError(err: any): string {
   console.error("RAW GOOGLE SHEETS ERROR:", err);
-  const msg = err.message || String(err);
-  const settings = getSettings();
-  const email = settings.gmailUserEmail || 'your logged-in account';
   
-  if (msg.includes('Insufficient Permission') || msg.toLowerCase().includes('insufficient permission') || msg.toLowerCase().includes('scope')) {
-    return `Access denied. The Google account (${email}) does not have Google Sheets permissions. Please click "Authorize Google Sheets Access" to re-authenticate and make sure you check the Google Sheets permissions checkbox on the consent screen.`;
+  const status = err.status || err.code || 'unknown';
+  const responseData = err.response?.data ? JSON.stringify(err.response.data) : 'none';
+  const rawMsg = err.message || String(err);
+  const errMsgDetailed = `Google Sheets API Error Details - Status: ${status}, Message: ${rawMsg}, Data: ${responseData}`;
+  
+  console.log(errMsgDetailed);
+  logToDb('ERROR', 'EXCEL', errMsgDetailed);
+
+  if (rawMsg.includes('Insufficient Permission') || rawMsg.toLowerCase().includes('insufficient permission') || rawMsg.toLowerCase().includes('scope')) {
+    const settings = getSettings();
+    const email = settings.gmailUserEmail || 'your logged-in account';
+    return `Access denied. The Google account (${email}) does not have Google Sheets permissions. Please click "Authorize Google Sheets Access" to re-authenticate and make sure you check the Google Sheets permissions checkbox on the consent screen. [Details: status ${status}, data: ${responseData}]`;
   }
-  if (msg.includes('caller does not have permission') || msg.toLowerCase().includes('permission') || err.status === 403) {
-    return `Access denied. The authenticated Google account (${email}) does not have permission to view or edit this spreadsheet. Please make sure the spreadsheet is shared with ${email} (with Editor/Writer access) or use a different spreadsheet.`;
+  if (rawMsg.includes('caller does not have permission') || rawMsg.toLowerCase().includes('permission') || status === 403) {
+    const settings = getSettings();
+    const email = settings.gmailUserEmail || 'your logged-in account';
+    return `Access denied. The authenticated Google account (${email}) does not have permission to view or edit this spreadsheet. Please make sure the spreadsheet is shared with ${email} (with Editor/Writer access) or use a different spreadsheet. [Details: status ${status}, data: ${responseData}]`;
   }
-  if (err.status === 404 || msg.includes('not found') || msg.includes('Requested entity was not found')) {
-    return 'Spreadsheet not found. Please verify the URL or Spreadsheet ID.';
+  if (status === 404 || rawMsg.includes('not found') || rawMsg.includes('Requested entity was not found')) {
+    return `Spreadsheet not found. Please verify the URL or Spreadsheet ID. [Details: status ${status}, data: ${responseData}]`;
   }
-  if (msg.includes('token expired') || msg.includes('invalid_grant')) {
+  if (rawMsg.includes('token expired') || rawMsg.includes('invalid_grant')) {
     return 'Google login session expired. Please re-authenticate your Google account.';
   }
-  if (msg.includes('ENOTFOUND') || msg.includes('fetch') || msg.includes('network')) {
+  if (rawMsg.includes('ENOTFOUND') || rawMsg.includes('fetch') || rawMsg.includes('network')) {
     return 'Network unavailable. Please check your internet connection.';
   }
-  if (err.status === 429 || msg.includes('quota')) {
+  if (status === 429 || rawMsg.includes('quota')) {
     return 'Google Sheets API rate limit exceeded. Please try again in a few minutes.';
   }
-  return msg;
+  return `${rawMsg} [Details: status ${status}, data: ${responseData}]`;
 }
 
 export async function appendReportToExcel({
@@ -87,6 +96,7 @@ export async function appendReportToExcel({
   }
 
   const spreadsheetId = extractSpreadsheetId(spreadsheetUrlOrId);
+  console.log("SHEETS API (append): Extracted Spreadsheet ID:", spreadsheetId);
   if (!spreadsheetId) {
     throw new Error('Invalid Google Spreadsheet URL or ID');
   }
@@ -112,7 +122,11 @@ export async function appendReportToExcel({
   logToDb('INFO', 'EXCEL', `Connecting to Google Sheets: ${spreadsheetId}`);
 
   try {
-    const oauth2Client = getOAuth2Client();
+    const oauth2Client = await getAuthenticatedClient();
+    const email = settings.gmailUserEmail || 'unknown';
+    console.log("SHEETS API (append): Executing spreadsheets.values.get under authenticated account email:", email);
+    logToDb('INFO', 'EXCEL', `Executing spreadsheets.values.get under email: ${email}`);
+
     const sheets = google.sheets({ version: 'v4', auth: oauth2Client });
 
     // 1. Get sheet values to find the next empty row
@@ -162,6 +176,7 @@ export async function appendReportToExcel({
 
     // 3. Write row data to target row number
     const writeRange = `${sheetName}!A${nextRowNumber}`;
+    console.log("SHEETS API (append): Executing spreadsheets.values.update under authenticated account email:", email);
     await sheets.spreadsheets.values.update({
       spreadsheetId,
       range: writeRange,
@@ -186,12 +201,18 @@ export async function getExcelMeta(spreadsheetUrlOrId: string): Promise<{ sheets
   }
 
   const spreadsheetId = extractSpreadsheetId(spreadsheetUrlOrId);
+  console.log("SHEETS API (inspect): Extracted Spreadsheet ID:", spreadsheetId);
   if (!spreadsheetId) {
     throw new Error('Invalid Google Spreadsheet URL or ID');
   }
 
   try {
-    const oauth2Client = getOAuth2Client();
+    const oauth2Client = await getAuthenticatedClient();
+    const settings = getSettings();
+    const email = settings.gmailUserEmail || 'unknown';
+    console.log("SHEETS API (inspect): Executing spreadsheets.get under authenticated account email:", email);
+    logToDb('INFO', 'EXCEL', `Executing spreadsheets.get under email: ${email}`);
+
     const sheets = google.sheets({ version: 'v4', auth: oauth2Client });
 
     // Fetch spreadsheet structure
@@ -206,6 +227,7 @@ export async function getExcelMeta(spreadsheetUrlOrId: string): Promise<{ sheets
 
     // Fetch column headers of the first sheet
     const targetSheet = sheetsList[0];
+    console.log("SHEETS API (inspect): Executing spreadsheets.values.get range: 1:1 under authenticated account email:", email);
     const valuesResponse = await sheets.spreadsheets.values.get({
       spreadsheetId,
       range: `${targetSheet}!1:1`,

@@ -2,7 +2,7 @@ import { google } from 'googleapis';
 import http from 'node:http';
 import crypto from 'node:crypto';
 import { shell } from 'electron';
-import { getSettings, saveSetting, logToDb } from '../database';
+import { getSettings, saveSetting, deleteSetting, logToDb } from '../database';
 
 const REDIRECT_PORT = 5999;
 const REDIRECT_URI = `http://localhost:${REDIRECT_PORT}/oauth2callback`;
@@ -10,8 +10,52 @@ const REDIRECT_URI = `http://localhost:${REDIRECT_PORT}/oauth2callback`;
 let oauthServer: http.Server | null = null;
 let oauthStateToken: string | null = null;
 
-// Helper to get configured OAuth client
+// Singleton OAuth client instance
+let sharedOAuth2Client: any = null;
+
+export function resetOAuth2Client() {
+  console.log("OAuth2 client instance reset triggered.");
+  sharedOAuth2Client = null;
+}
+
+// Invalidate token if required scopes are missing
+export function validateTokenScopes(): boolean {
+  const settings = getSettings();
+  const tokensRaw = settings.gmailTokens;
+  if (!tokensRaw) return false;
+
+  try {
+    const tokens = JSON.parse(tokensRaw);
+    const scopeString = tokens.scope || '';
+    const scopes = scopeString.split(' ');
+
+    const hasGmail = scopes.includes('https://www.googleapis.com/auth/gmail.send');
+    const hasSheets = scopes.includes('https://www.googleapis.com/auth/spreadsheets');
+
+    if (!hasGmail || !hasSheets) {
+      logToDb('WARN', 'GMAIL', `Stored tokens are missing required scopes. Invalidation triggered. Granted scopes: ${scopeString}`);
+      console.warn(`Stored tokens are missing required scopes. Invalidation triggered. Granted scopes: ${scopeString}`);
+      
+      deleteSetting('gmailTokens');
+      deleteSetting('gmailUserEmail');
+      resetOAuth2Client();
+      return false;
+    }
+    return true;
+  } catch (err) {
+    return false;
+  }
+}
+
+// Helper to get configured OAuth client (singleton)
 export function getOAuth2Client(): any {
+  // Check if scopes changed first
+  validateTokenScopes();
+
+  if (sharedOAuth2Client) {
+    return sharedOAuth2Client;
+  }
+
   const settings = getSettings();
   const clientId = settings.gmailClientId || '';
   const clientSecret = settings.gmailClientSecret || '';
@@ -20,19 +64,51 @@ export function getOAuth2Client(): any {
     throw new Error('Gmail Client ID or Client Secret is not configured in settings.');
   }
 
-  const oauth2Client = new google.auth.OAuth2(clientId, clientSecret, REDIRECT_URI);
+  sharedOAuth2Client = new google.auth.OAuth2(clientId, clientSecret, REDIRECT_URI);
 
   // Load existing tokens if they exist
   const tokensRaw = settings.gmailTokens;
   if (tokensRaw) {
     try {
-      oauth2Client.setCredentials(JSON.parse(tokensRaw));
+      sharedOAuth2Client.setCredentials(JSON.parse(tokensRaw));
     } catch (err) {
       logToDb('ERROR', 'GMAIL', 'Failed to parse stored Gmail OAuth tokens');
     }
   }
 
-  return oauth2Client;
+  // Register token event listener to auto-persist refreshed tokens
+  sharedOAuth2Client.on('tokens', (newTokens: any) => {
+    console.log("OAuth client received auto-refreshed tokens:", newTokens);
+    logToDb('INFO', 'GMAIL', 'OAuth client received auto-refreshed tokens.');
+
+    const currentSettings = getSettings();
+    if (currentSettings.gmailTokens) {
+      try {
+        const existing = JSON.parse(currentSettings.gmailTokens);
+        const merged = { ...existing, ...newTokens };
+        saveSetting('gmailTokens', JSON.stringify(merged));
+      } catch (e) {
+        saveSetting('gmailTokens', JSON.stringify(newTokens));
+      }
+    } else {
+      saveSetting('gmailTokens', JSON.stringify(newTokens));
+    }
+  });
+
+  return sharedOAuth2Client;
+}
+
+// Ensure the client has fresh, refreshed credentials before a request
+export async function getAuthenticatedClient(): Promise<any> {
+  const client = getOAuth2Client();
+  try {
+    const accessTokenObj = await client.getAccessToken();
+    console.log("getAuthenticatedClient: Client verified. Access token exists:", !!accessTokenObj.token);
+  } catch (err: any) {
+    console.error("getAuthenticatedClient: Token refresh failed:", err.message);
+    throw new Error(`Google authorization refresh failed: ${err.message}`);
+  }
+  return client;
 }
 
 // Start Gmail OAuth authorization process
@@ -45,6 +121,8 @@ export function startGmailAuthFlow(): Promise<{ email: string; tokens: any }> {
         oauthServer = null;
       }
 
+      // Invalidate the old singleton client so we get a completely fresh setup
+      resetOAuth2Client();
       const oauth2Client = getOAuth2Client();
 
       // Generate a secure random token to prevent CSRF attacks
@@ -86,6 +164,10 @@ export function startGmailAuthFlow(): Promise<{ email: string; tokens: any }> {
 
             // Exchange authorization code for tokens
             const { tokens } = await oauth2Client.getToken(code);
+            console.log("OAuth token exchange completed. Tokens object keys:", Object.keys(tokens));
+            console.log("OAuth token scope returned:", tokens.scope);
+            logToDb('INFO', 'GMAIL', `OAuth token exchange completed. Scope: ${tokens.scope}`);
+
             oauth2Client.setCredentials(tokens);
 
             // Fetch user's email address to verify identity
@@ -171,7 +253,8 @@ export async function sendEmail({
     throw new Error('Gmail account is not authenticated. Please run the setup wizard.');
   }
 
-  const oauth2Client = getOAuth2Client();
+  // Ensure client is authenticated and refreshed
+  const oauth2Client = await getAuthenticatedClient();
 
   // Create Gmail API client
   const gmail = google.gmail({ version: 'v1', auth: oauth2Client });
