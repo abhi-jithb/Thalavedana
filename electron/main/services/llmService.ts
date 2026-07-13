@@ -21,6 +21,88 @@ function cleanJsonResponse(rawText: string): any {
   return JSON.parse(cleaned.trim());
 }
 
+// Extracts the major/minor numerical version from the model name (e.g. gemini-2.5-flash -> 2.5)
+function extractGeminiVersion(name: string): number {
+  const match = name.match(/gemini-(\d+(\.\d+)?)/i);
+  if (match && match[1]) {
+    return parseFloat(match[1]);
+  }
+  return 0;
+}
+
+// Identifies if a model is a stable Flash model
+const isStableFlash = (name: string): boolean => {
+  const lower = name.toLowerCase();
+  return lower.includes('flash') && 
+         !lower.includes('preview') && 
+         !lower.includes('exp') && 
+         !lower.includes('tuned') && 
+         !lower.includes('lite') && 
+         !lower.includes('00'); // Exclude specific build versions
+};
+
+// Identifies if a model is a stable Pro model
+const isStablePro = (name: string): boolean => {
+  const lower = name.toLowerCase();
+  return lower.includes('pro') && 
+         !lower.includes('preview') && 
+         !lower.includes('exp') && 
+         !lower.includes('tuned') && 
+         !lower.includes('lite') && 
+         !lower.includes('ultra') &&
+         !lower.includes('00');
+};
+
+// Dynamic discovery of Google Gemini models from Google API
+async function discoverGeminiModels(apiKey: string): Promise<string[]> {
+  try {
+    const listUrl = `https://generativelanguage.googleapis.com/v1beta/models?key=${apiKey}`;
+    const listRes = await fetch(listUrl);
+    if (!listRes.ok) {
+      console.error(`Failed to list Gemini models. Status: ${listRes.status}`);
+      return [];
+    }
+    const listData = await listRes.json();
+    const rawModels: any[] = listData.models || [];
+    
+    // Filter only models that support generateContent
+    const filtered = rawModels.filter(m => 
+      m.supportedGenerationMethods?.includes('generateContent') ||
+      m.supportedGenerationMethods?.includes('generateMessage')
+    );
+
+    // Group and sort descending by version number
+    const stableFlash = filtered.filter(m => isStableFlash(m.name))
+      .sort((a, b) => extractGeminiVersion(b.name) - extractGeminiVersion(a.name));
+
+    const stablePro = filtered.filter(m => isStablePro(m.name))
+      .sort((a, b) => extractGeminiVersion(b.name) - extractGeminiVersion(a.name));
+
+    const anyGemini = filtered.filter(m => m.name.toLowerCase().includes('gemini'))
+      .sort((a, b) => extractGeminiVersion(b.name) - extractGeminiVersion(a.name));
+
+    const anyText = filtered;
+
+    const orderedModels: any[] = [
+      ...stableFlash,
+      ...stablePro,
+      ...anyGemini,
+      ...anyText
+    ];
+
+    // Strip 'models/' prefix and filter unique values
+    const names = orderedModels.map(m => {
+      const name = m.name || '';
+      return name.startsWith('models/') ? name.substring(7) : name;
+    }).filter(Boolean);
+
+    return Array.from(new Set(names));
+  } catch (err: any) {
+    console.error("Error discovering Gemini models:", err.message);
+    return [];
+  }
+}
+
 export async function generateReportFromLLM(
   dateStr: string,
   scrapeResults: RepoScrapeResult[]
@@ -28,7 +110,7 @@ export async function generateReportFromLLM(
   const settings = getSettings();
   const provider = settings.llmProvider || 'gemini';
   const apiKey = settings.geminiApiKey || '';
-  const model = settings.llmModel || (provider === 'gemini' ? 'gemini-1.5-flash' : 'gpt-4o-mini');
+  const modelConfig = settings.llmModel || '';
   const endpoint = settings.llmEndpoint || '';
 
   if (!apiKey && provider === 'gemini') {
@@ -81,103 +163,126 @@ You MUST respond ONLY with a raw JSON object containing these keys:
 
   const prompt = `Date: ${dateStr}\n\nHere is the Git commit history and diffs for today:\n\n${gitHistoryText}`;
 
-  // 1. Log the configured source model name from settings
-  console.log(`LLM REQUEST: Stored model configuration in database: "${settings.llmModel || 'none (using default)'}"`);
-  logToDb('INFO', 'LLM', `LLM REQUEST: Stored model configuration in database: "${settings.llmModel || 'none (using default)'}"`);
-
   if (provider === 'gemini') {
-    // 2. Fetch available models from Gemini API to verify list
-    let availableModels: any[] = [];
-    try {
-      const listUrl = `https://generativelanguage.googleapis.com/v1beta/models?key=${apiKey}`;
-      const listRes = await fetch(listUrl);
-      if (listRes.ok) {
-        const listData = await listRes.json();
-        availableModels = listData.models || [];
-        const names = availableModels.map((m: any) => m.name) || [];
-        console.log("DEBUG: Available Gemini Models for this API Key:", names);
-        logToDb('INFO', 'LLM', `DEBUG: Available Gemini Models: ${names.join(', ')}`);
+    // 1. Discover available models dynamically
+    let availableModels = await discoverGeminiModels(apiKey);
+    
+    // 2. Select initial model
+    let initialModel = modelConfig.startsWith('models/') ? modelConfig.substring(7) : modelConfig;
+    
+    if (!initialModel || !availableModels.includes(initialModel)) {
+      if (availableModels.length > 0) {
+        const oldModel = initialModel || 'none';
+        const fallback = availableModels[0] || '';
+        
+        console.log("Configured model:", oldModel);
+        console.log("Selected fallback:", fallback);
+        console.log("Old model:", oldModel);
+        console.log("New model:", fallback);
+        console.log("Reason: Configured model not found in available models list.");
+        
+        logToDb('WARN', 'LLM', `Configured model "${oldModel}" is invalid. Selected fallback: ${fallback}. Reason: Not found in available models.`);
+        
+        initialModel = fallback;
+        saveSetting('llmModel', fallback);
       } else {
-        console.error("DEBUG: Failed to list Gemini models. Status:", listRes.status);
-      }
-    } catch (listErr: any) {
-      console.error("DEBUG: Error listing Gemini models:", listErr.message);
-    }
-
-    // 3. Clean the model identifier to strip any redundant "models/" prefix
-    let cleanModel = model.startsWith('models/') ? model.substring(7) : model;
-    const fullModelName = `models/${cleanModel}`;
-
-    const supportsGenerateContent = (m: any) => 
-      m.supportedGenerationMethods?.includes('generateContent') || 
-      m.supportedGenerationMethods?.includes('generateMessage');
-
-    // 4. Verify model validity and auto-switch if needed
-    const exactMatch = availableModels.find(m => m.name === fullModelName && supportsGenerateContent(m));
-
-    if (availableModels.length > 0 && !exactMatch) {
-      console.warn(`Resolved model "${model}" is either invalid or unsupported for generateContent.`);
-      logToDb('WARN', 'LLM', `Resolved model "${model}" is invalid or unsupported. Automatically resolving best compatible model.`);
-
-      // Find best fallback model
-      let fallbackModelObj = availableModels.find(m => m.name?.includes('gemini-1.5-flash') && supportsGenerateContent(m));
-      
-      if (!fallbackModelObj) {
-        fallbackModelObj = availableModels.find(m => m.name?.toLowerCase().includes('flash') && supportsGenerateContent(m));
-      }
-      if (!fallbackModelObj) {
-        fallbackModelObj = availableModels.find(m => m.name?.toLowerCase().includes('gemini') && supportsGenerateContent(m));
-      }
-      if (!fallbackModelObj) {
-        fallbackModelObj = availableModels.find(m => supportsGenerateContent(m));
-      }
-
-      if (fallbackModelObj) {
-        const rawFallbackName = fallbackModelObj.name || '';
-        cleanModel = rawFallbackName.startsWith('models/') ? rawFallbackName.substring(7) : rawFallbackName;
-        console.log(`Auto-switching to compatible model: ${cleanModel}`);
-        logToDb('INFO', 'LLM', `Auto-switching model configuration to: ${cleanModel}`);
-        saveSetting('llmModel', cleanModel);
+        throw new Error('No compatible Google Gemini models discovered. Please check your API key and network connection.');
       }
     }
 
-    // 5. Log resolved model name immediately before generateContent
-    console.log(`LLM REQUEST: Resolved model identifier for query: "${cleanModel}"`);
-    logToDb('INFO', 'LLM', `LLM REQUEST: Resolved model identifier for query: "${cleanModel}"`);
+    let activeModel = initialModel;
+    console.log("Configured model:", modelConfig || 'none');
+    console.log("Resolved model:", initialModel);
+    console.log("Actual model sent:", activeModel);
+    console.log("Available models:", availableModels.join(', '));
 
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/${cleanModel}:generateContent?key=${apiKey}`;
-    const response = await fetch(url, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        contents: [
-          {
-            parts: [
-              {
-                text: `${systemInstructions}\n\n${prompt}`,
-              },
-            ],
-          },
-        ],
-        generationConfig: {
-          responseMimeType: 'application/json',
-          responseSchema: {
-            type: 'OBJECT',
-            properties: {
-              report: { type: 'STRING' },
-              emailSubject: { type: 'STRING' },
-              emailBody: { type: 'STRING' },
-            },
-            required: ['report', 'emailSubject', 'emailBody'],
-          },
+    const makeRequest = async (targetModel: string) => {
+      const url = `https://generativelanguage.googleapis.com/v1beta/models/${targetModel}:generateContent?key=${apiKey}`;
+      return await fetch(url, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
         },
-      }),
-    });
+        body: JSON.stringify({
+          contents: [
+            {
+              parts: [
+                {
+                  text: `${systemInstructions}\n\n${prompt}`,
+                },
+              ],
+            },
+          ],
+          generationConfig: {
+            responseMimeType: 'application/json',
+            responseSchema: {
+              type: 'OBJECT',
+              properties: {
+                report: { type: 'STRING' },
+                emailSubject: { type: 'STRING' },
+                emailBody: { type: 'STRING' },
+              },
+              required: ['report', 'emailSubject', 'emailBody'],
+            },
+          },
+        }),
+      });
+    };
+
+    let response = await makeRequest(activeModel);
+    let isErrorResponse = false;
+    let errorText = '';
 
     if (!response.ok) {
-      const errorText = await response.text();
+      isErrorResponse = true;
+      errorText = await response.text();
+    }
+
+    // 3. Self-healing / Retry if model not found or deprecated
+    const shouldRetry = isErrorResponse && (
+      response.status === 404 ||
+      errorText.includes('NOT_FOUND') ||
+      errorText.includes('Model not found') ||
+      errorText.toLowerCase().includes('deprecated') ||
+      errorText.toLowerCase().includes('not supported')
+    );
+
+    if (shouldRetry) {
+      console.warn(`Gemini API call failed with model "${activeModel}". Status: ${response.status}. Initiating self-healing...`);
+      logToDb('WARN', 'LLM', `Gemini request failed for model: ${activeModel}. Error: ${errorText}. Self-healing triggered.`);
+
+      // Refresh list of models
+      availableModels = await discoverGeminiModels(apiKey);
+      
+      // Filter out the failed model
+      const remainingModels = availableModels.filter(m => m !== activeModel);
+      
+      if (remainingModels.length > 0) {
+        const replacement = remainingModels[0] || '';
+        
+        console.log("Old model:", activeModel);
+        console.log("New model:", replacement);
+        console.log("Reason:", `API returned error status ${response.status} (${errorText})`);
+        console.log("Selected fallback:", replacement);
+        
+        logToDb('INFO', 'LLM', `Self-healed. Old model: ${activeModel}, New model: ${replacement}. Reason: API error.`);
+        
+        activeModel = replacement;
+        saveSetting('llmModel', replacement);
+        
+        // Retry the request once
+        console.log("Actual model sent (retry):", activeModel);
+        response = await makeRequest(activeModel);
+        
+        if (!response.ok) {
+          errorText = await response.text();
+          logToDb('ERROR', 'LLM', `Retry also failed. Gemini API error: ${errorText}`);
+          throw new Error(`Gemini API returned error code ${response.status}: ${errorText}`);
+        }
+      } else {
+        throw new Error(`Gemini API call failed with ${response.status}: ${errorText}. No alternative fallback models available.`);
+      }
+    } else if (isErrorResponse) {
       logToDb('ERROR', 'LLM', `Gemini API error: ${errorText}`);
       throw new Error(`Gemini API returned error code ${response.status}: ${errorText}`);
     }
@@ -205,7 +310,7 @@ You MUST respond ONLY with a raw JSON object containing these keys:
         'Authorization': `Bearer ${apiKey}`,
       },
       body: JSON.stringify({
-        model: model,
+        model: modelConfig || 'gpt-4o-mini',
         messages: [
           { role: 'system', content: systemInstructions },
           { role: 'user', content: prompt },

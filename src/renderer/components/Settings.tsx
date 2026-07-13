@@ -248,7 +248,7 @@ export default function Settings({
               <label>Model Name</label>
               <input 
                 type="text" 
-                placeholder={llmProvider === 'gemini' ? 'gemini-1.5-flash' : 'gpt-4o-mini'}
+                placeholder={llmProvider === 'gemini' ? 'Auto-detected' : 'gpt-4o-mini'}
                 value={llmModel}
                 onChange={(e) => setLlmModel(e.target.value)}
               />
