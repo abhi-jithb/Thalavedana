@@ -1,77 +1,65 @@
 # Thalavedana 🧠
 
-A privacy-first, local-only Electron desktop application that automates the generation and submission of internship work reports. It automatically scrapes daily Git history, drafts professional summaries via Google Gemini/LLM, appends entries to a local Excel log sheet (preserving layout styles), and sends email updates via secure Gmail OAuth2.
+A privacy-first, local-only Electron desktop application that completely automates your daily internship work reporting. It scrapes commits from your local Git repositories, synthesizes professional daily work summaries using Google Gemini, appends rows to a styled Excel journal sheet, and dispatches the summary via secure Gmail OAuth2.
 
 ---
 
-## Key Features
+## 🔒 Security-First & Local-Only Design
 
-- **Daily Git Scraping**: Connect multiple local Git repositories. The app parses today's commits, changed files, and code diffs (safely truncated to preserve LLM context limits).
-- **AI-Generated Summaries**: Formulates professional report bullet points and email bodies using Google Gemini (or custom OpenAI-compatible endpoints) strictly on request or scheduler ticks.
-- **Excel Appender**: Dynamically writes report date, text summaries, and repository metadata into your custom internship log sheet using `exceljs`, while maintaining row styling.
-- **Secure Gmail Delivery**: Integrates OAuth2 through a local loopback server (`http://localhost:5999/oauth2callback`) to send email reports directly from your address.
-- **Startup Recovery Scheduler**: If your computer is shut down during the daily schedule time, the background manager scans the past 7 days of history on boot, runs any missing days, and retries pending deliveries.
-
----
-
-## Tech Stack & Architecture
-
-- **Core**: Electron (Main, Preload IPC Bridge), React, TypeScript.
-- **Database**: Native `node:sqlite` (SQLite) for storing settings, repositories, historical reports, and logs.
-- **Libraries**:
-  - `exceljs` for safe spreadsheet manipulation.
-  - `googleapis` for Google Gmail OAuth2.
-- **Design**: Modern dark glassmorphic styling utilizing vanilla CSS, responsive grids, active indicators, and custom consoles.
+- **OS Keyring Cryptography**: Sensitive credentials (Gemini API keys, Gmail OAuth2 client secrets, and refresh tokens) are encrypted at rest using Electron's native `safeStorage` API. On Linux, this automatically integrates with the system login keyring (GNOME Keyring / KWallet). No keys are ever stored in plain text.
+- **Zero-Shell Execution**: Uses `execFile` with structured string arguments for Git scraping, ensuring protection against command-injection vulnerabilities.
+- **CSRF Protection**: The local Gmail authentication callback server uses secure cryptographically generated state token validations.
+- **Zero Cloud Footprint**: All scanned commits, draft reports, application settings, and logs are persisted locally inside an SQLite database (`thalavedana.db`). No telemetry or code leaks.
 
 ---
 
-## Installation & Launch
+## ⚡ Key Highlights
 
-### 1. Install Dependencies
+- **Live Stage Orchestration Panel**: A step-by-step progress visualizer (**Git Scrape** → **AI Summary** → **Excel Log** → **Gmail Sent**) on the dashboard shows real-time subtask status, commit volumes, and logs during automated or manual runs.
+- **Startup Recovery**: Computes lookback ranges on app boot to backfill and send reports for dates where the computer was turned off during scheduled run times.
+- **Auto Log Pruning**: Automatically cleans and prunes historical debug and system logs older than 30 days.
+
+---
+
+## 📂 Technical Documentation
+
+Deep dive into the architectural blueprints in the `docs/` folder:
+
+* 🏗️ **[docs/ARCHITECTURE.md](file:///home/abhijithb/Projects/Thalavedana/docs/ARCHITECTURE.md)**: Main, Preload, and Renderer multi-process boundaries.
+* 🔄 **[docs/WORKFLOW.md](file:///home/abhijithb/Projects/Thalavedana/docs/WORKFLOW.md)**: Sequential diagrams of the orchestration engine.
+* 🗄️ **[docs/DATABASE.md](file:///home/abhijithb/Projects/Thalavedana/docs/DATABASE.md)**: SQLite tables and keyring storage schema.
+* 🔌 **[docs/API.md](file:///home/abhijithb/Projects/Thalavedana/docs/API.md)**: Secure context bridge IPC channel documentation.
+* 🛠️ **[docs/DEVELOPMENT.md](file:///home/abhijithb/Projects/Thalavedana/docs/DEVELOPMENT.md)**: Step-by-step installation and manual execution guide.
+* 🔮 **[docs/ROADMAP.md](file:///home/abhijithb/Projects/Thalavedana/docs/ROADMAP.md)**: Windows compatibility and Ollama local model expansions.
+* 📜 **[docs/CHANGELOG.md](file:///home/abhijithb/Projects/Thalavedana/docs/CHANGELOG.md)**: Hardening features and release updates.
+
+---
+
+## 🚀 Quick Start Guide
+
+### 1. Install Project Dependencies
 ```bash
 npm install
 ```
 
-### 2. Run in Development Mode
-Starts the Electron application window with hot module reloading (HMR) for the React renderer:
+### 2. Launch the Development Client
 ```bash
 npm run dev
 ```
 
-### 3. Build Production Bundle
-Bundles the code for distribution:
+### 3. Verify Types & Compilation
 ```bash
+npm run typecheck
 npm run build
 ```
 
 ---
 
-## Configuration & Setup Wizard
+## ⚙️ Initial Configuration Steps
 
 When starting the application for the first time, you will be guided through a Setup Wizard:
-
-1. **Git Repositories**: Input paths of folders containing active Git work. The wizard checks paths and verifies they are valid repository directories.
-2. **LLM Provider**:
-   - **Gemini (Native)**: Input your Google Gemini API key. Uses `gemini-1.5-flash` by default.
-   - **OpenAI-Compatible**: Enter a custom model name and endpoint (e.g. Groq, local LLMs like Ollama).
-3. **Gmail Connection**:
-   - Open your Google Cloud Console.
-   - Enable the **Gmail API** for your project.
-   - Create an **OAuth 2.0 Client ID** (Application type: *Web application*).
-   - Add Authorized redirect URIs: `http://localhost:5999/oauth2callback`.
-   - Paste the Client ID and Secret in the Wizard, click **Authorize Gmail Account**, and complete the sign-in flow.
-4. **Email Targets**: Set recipient emails (`To`), copy addresses (`Cc`), and backup folders (`Bcc`).
-5. **Excel Mapping**:
-   - Point to your internship spreadsheet file on disk and click **Inspect Excel**.
-   - Select your target worksheet.
-   - Map your layout columns (e.g. `Column A` -> Report Date, `Column B` -> LLM Work Report Summary, `Column C` -> Repository names, or Fixed strings/Blank cells).
-6. **Scheduler Time**: Choose the daily execution time (e.g. `17:30`).
-
----
-
-## Verification & Type Safety
-
-Verification checks are in place:
-- **Typecheck**: `npm run typecheck` passes with zero compiler issues.
-- **Zero background CPU idle overhead**: Operation checks are performed once a minute to see if a scheduler event is ready, maintaining low memory footprints.
-- **Local-first Security**: All API keys, secrets, repositories, and historical logs are persisted only to the local SQLite database.
+1. **Git Repositories**: Specify the local folder paths of repositories you work on.
+2. **LLM Provider**: Enter your Gemini API key (native support for fast and free summaries).
+3. **Gmail Credentials**: Enable Gmail API on the Google Developer Console, create an OAuth Web Client ID with redirect URI `http://localhost:5999/oauth2callback`, and authorize your account.
+4. **Excel Mapping**: Select your log spreadsheet (`.xlsx`) and map columns (e.g. Column A -> Date, Column B -> Report Summary, etc.) preserving row formats.
+5. **Scheduler**: Set the daily execution time.

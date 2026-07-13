@@ -9,6 +9,7 @@ dist/
 *.db
 *.log
 *.local
+.env*
 
 # System files
 .DS_Store
