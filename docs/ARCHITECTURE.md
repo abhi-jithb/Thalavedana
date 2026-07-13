@@ -14,7 +14,7 @@ graph TD
     Main <--> Git[Git Binary: execFile]
     Main <--> Gemini[Google Gemini API]
     Main <--> Gmail[Gmail API OAuth2]
-    Main <--> Excel[Excel File via exceljs]
+    Main <--> Sheets[Google Sheets API]
 ```
 
 ### 1. Main Process (`electron/main/`)

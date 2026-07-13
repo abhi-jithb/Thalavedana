@@ -267,9 +267,9 @@ export default function Dashboard({
               </span>
             </div>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <span style={{ fontSize: '13px', color: 'var(--text-muted)' }}>Excel Map</span>
+              <span style={{ fontSize: '13px', color: 'var(--text-muted)' }}>Google Sheets</span>
               <span className={`status-pill ${excelReady ? 'status-pill--success' : 'status-pill--failed'}`} style={{ padding: '2px 8px', fontSize: '10px' }}>
-                {excelReady ? '✓ Ready' : '× Select'}
+                {excelReady ? '✓ Connected' : '× Missing'}
               </span>
             </div>
           </div>
@@ -362,7 +362,7 @@ export default function Dashboard({
             <div style={{ display: 'flex', flexDirection: 'column' }}>
               {renderTimelineItem('Git Scrape', 'Monitored repository scanning', pipelineStatus.git)}
               {renderTimelineItem('AI Summary', 'Formulating work summary via Gemini', pipelineStatus.ai)}
-              {renderTimelineItem('Excel Log', 'Adding entries to spreadsheet', pipelineStatus.excel)}
+              {renderTimelineItem('Google Sheets', 'Appending row to Google Sheets', pipelineStatus.excel)}
               {renderTimelineItem('Gmail Sent', 'Delivering email updates via Gmail', pipelineStatus.gmail)}
             </div>
 

@@ -42,11 +42,12 @@ export default function SetupWizard({
   const [emailCc, setEmailCc] = useState(settings.emailCc || '');
   const [emailBcc, setEmailBcc] = useState(settings.emailBcc || '');
 
-  // Excel Mapping
-  const [excelPath, setExcelPath] = useState(settings.excelPath || '');
+  // Google Sheet State
+  const [excelPath, setExcelPath] = useState(settings.excelPath || ''); // We store Google Sheet URL in excelPath
   const [excelSheetName, setExcelSheetName] = useState(settings.excelSheetName || '');
   const [sheetsList, setSheetsList] = useState<string[]>([]);
   const [columnsPreview, setColumnsPreview] = useState<string[]>([]);
+  const [spreadsheetTitle, setSpreadsheetTitle] = useState('');
   const [excelError, setExcelError] = useState('');
   const [excelInspecting, setExcelInspecting] = useState(false);
   
@@ -125,33 +126,69 @@ export default function SetupWizard({
     setCurrentStep(5);
   };
 
-  // Step 5: Excel inspection
+  // Step 5: Google Sheets auto mapping detection
+  const detectColumnMappings = (columns: string[]) => {
+    const result: Array<{ col: string; type: string; fixedValue: string }> = [];
+    columns.forEach(colStr => {
+      const parts = colStr.split(': ');
+      const colLetter = parts[0]?.trim();
+      const colHeader = parts.slice(1).join(': ').trim().toLowerCase();
+      
+      if (!colLetter) return;
+
+      if (['date', 'datum', 'day'].some(k => colHeader.includes(k))) {
+        result.push({ col: colLetter, type: 'date', fixedValue: '' });
+      } else if (['report', 'summary', 'work', 'daily report', 'work report', 'details', 'tasks', 'description', 'activity'].some(k => colHeader.includes(k))) {
+        result.push({ col: colLetter, type: 'report', fixedValue: '' });
+      } else if (['repositories', 'repo', 'project', 'location', 'git'].some(k => colHeader.includes(k))) {
+        result.push({ col: colLetter, type: 'repositories', fixedValue: '' });
+      } else {
+        result.push({ col: colLetter, type: 'empty', fixedValue: '' });
+      }
+    });
+
+    return result.length > 0 ? result : [
+      { col: 'A', type: 'date', fixedValue: '' },
+      { col: 'B', type: 'report', fixedValue: '' },
+      { col: 'C', type: 'repositories', fixedValue: '' }
+    ];
+  };
+
+  // Step 5: Google Sheet verification
   const handleInspectExcel = async () => {
     setExcelError('');
+    setSpreadsheetTitle('');
+    setSheetsList([]);
+    setColumnsPreview([]);
     if (!excelPath.trim()) {
-      setExcelError('Excel file path is required.');
+      setExcelError('Google Spreadsheet URL or ID is required.');
       return;
     }
 
     setExcelInspecting(true);
     try {
       const meta = await window.thalavedana.inspectExcel(excelPath.trim());
+      setSpreadsheetTitle(meta.title || 'Google Sheet');
       setSheetsList(meta.sheets);
       setColumnsPreview(meta.columnsPreview);
       if (meta.sheets.length > 0 && !excelSheetName) {
         setExcelSheetName(meta.sheets[0] || '');
       }
+
+      // Automatically map columns
+      const autoMappings = detectColumnMappings(meta.columnsPreview);
+      setMappings(autoMappings);
     } catch (err: any) {
-      setExcelError(err.message || 'Failed to open Excel file. Verify path.');
+      setExcelError(err.message || 'Failed to inspect Google Sheet. Verify URL and make sure your Google account is fully authorized.');
     } finally {
       setExcelInspecting(false);
     }
   };
 
-  // Save Excel column mapping
+  // Save Google Sheet Column Mapping
   const handleSaveExcel = async () => {
     if (!excelPath.trim()) {
-      setExcelError('Excel file path is required.');
+      setExcelError('Google Sheet URL or ID is required.');
       return;
     }
     await saveSetting('excelPath', excelPath.trim());
@@ -185,6 +222,13 @@ export default function SetupWizard({
     await saveSetting('setupCompleted', 'true');
     await refreshAll();
   };
+
+  // Verification helper for column mappings
+  const hasDateMapping = mappings.some(m => m.type === 'date');
+  const hasReportMapping = mappings.some(m => m.type === 'report');
+  const mappingValidationError = !hasDateMapping || !hasReportMapping
+    ? 'Please map at least one column to "Report Date" and one to "Work Report Summary".'
+    : '';
 
   return (
     <div className="wizard">
@@ -424,27 +468,31 @@ export default function SetupWizard({
 
         {currentStep === 5 && (
           <div>
-            <h2>Setup Excel Template</h2>
+            <h2>Connect Google Sheet</h2>
             <p className="wizard__tip">
-              Select your spreadsheet file. You can map workbook columns directly to the report variables.
+              Paste the URL of your Google Sheets document. Make sure your authenticated account has permissions to edit it.
             </p>
 
             <form onSubmit={(e) => { e.preventDefault(); handleInspectExcel(); }} className="form-group row" style={{ marginBottom: '16px' }}>
               <input 
                 type="text" 
-                placeholder="e.g. /home/username/Internship/report.xlsx"
+                placeholder="https://docs.google.com/spreadsheets/d/.../edit"
                 value={excelPath}
                 onChange={(e) => setExcelPath(e.target.value)}
                 disabled={excelInspecting}
               />
               <button type="submit" className="btn btn--secondary" disabled={excelInspecting}>
-                {excelInspecting ? 'Loading...' : 'Inspect File'}
+                {excelInspecting ? 'Connecting...' : 'Verify Spreadsheet'}
               </button>
             </form>
-            {excelError && <p className="error-text">{excelError}</p>}
+            {excelError && <p className="error-text" style={{ marginBottom: '16px' }}>{excelError}</p>}
 
             {sheetsList.length > 0 && (
               <div className="excel-setup-box" style={{ padding: 0, border: 'none' }}>
+                <div style={{ marginBottom: '16px', background: 'var(--success-bg)', padding: '12px 16px', borderRadius: '8px', border: '1px solid var(--success-border)', color: 'var(--success-text)' }}>
+                  Spreadsheet Title: <strong>{spreadsheetTitle}</strong>
+                </div>
+
                 <div className="form-field">
                   <label>Select Worksheet</label>
                   <select value={excelSheetName} onChange={(e) => setExcelSheetName(e.target.value)}>
@@ -453,7 +501,7 @@ export default function SetupWizard({
                 </div>
 
                 <div className="excel-columns-preview">
-                  <strong>First Row Preview:</strong>
+                  <strong>Detected Columns preview:</strong>
                   <div className="preview-tags">
                     {columnsPreview.map((c, i) => (
                       <span key={i} className="preview-tag">{c}</span>
@@ -461,7 +509,7 @@ export default function SetupWizard({
                   </div>
                 </div>
 
-                <div className="mapping-table" style={{ marginTop: '16px' }}>
+                <div className="mapping-table" style={{ marginTop: '20px' }}>
                   <h4>Column Configuration Mapping</h4>
                   <table className="table">
                     <thead>
@@ -520,11 +568,18 @@ export default function SetupWizard({
               </div>
             )}
 
+            {mappingValidationError && sheetsList.length > 0 && (
+              <div className="error-banner" style={{ marginTop: '16px' }}>
+                {mappingValidationError}
+              </div>
+            )}
+
             <div className="wizard__actions">
               <button className="btn btn--secondary" onClick={() => setCurrentStep(4)}>Back</button>
               <button 
                 className="btn btn--primary" 
                 onClick={handleSaveExcel}
+                disabled={sheetsList.length === 0 || !!mappingValidationError}
               >
                 Continue
               </button>
@@ -550,7 +605,10 @@ export default function SetupWizard({
 
             <div className="wizard__actions">
               <button className="btn btn--secondary" onClick={() => setCurrentStep(5)}>Back</button>
-              <button className="btn btn--primary" onClick={handleCompleteSetup}>
+              <button 
+                className="btn btn--primary" 
+                onClick={handleCompleteSetup}
+              >
                 Finish Setup
               </button>
             </div>

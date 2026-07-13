@@ -129,7 +129,7 @@ export default function App() {
             <span>🔒 Privacy Scoped</span>
             <span>💾 Local Database</span>
             <span>🔑 safeStorage Encrypted</span>
-            <span>📊 exceljs Appender</span>
+            <span>📊 Google Sheets API</span>
           </div>
         )}
       </aside>

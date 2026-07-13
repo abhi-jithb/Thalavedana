@@ -9,7 +9,7 @@ sequenceDiagram
     participant Git as Git CLI Scraper
     participant LLM as Gemini API
     participant DB as SQLite DB
-    participant Excel as Excel Service
+    participant Sheets as Google Sheets Service
     participant Gmail as Gmail Service
 
     UI->>Orchestrator: Trigger Report (date)
@@ -20,9 +20,9 @@ sequenceDiagram
     Orchestrator->>LLM: Generate report from commits
     LLM-->>Orchestrator: Report & Email content
     Orchestrator->>DB: Save Report to DB
-    Orchestrator->>UI: Status update: Excel Running
-    Orchestrator->>Excel: Append row to workbook
-    Excel-->>Orchestrator: Done
+    Orchestrator->>UI: Status update: Sheets Running
+    Orchestrator->>Sheets: Append row to spreadsheet
+    Sheets-->>Orchestrator: Done
     Orchestrator->>UI: Status update: Gmail Running
     Orchestrator->>Gmail: Send MIME email
     Gmail-->>Orchestrator: Done
@@ -45,10 +45,10 @@ sequenceDiagram
   - **Email Subject**: A professional title.
   - **Email Body**: A polite, complete email ready to send.
 
-### 3. Excel Log Stage
-- Loads the configured spreadsheet template using `exceljs`.
-- Locates the specified sheet.
-- Appends a new row mapping dates, repository names, and markdown summaries into columns matching the user's custom mappings.
+### 3. Google Sheets Log Stage
+- Connects securely to the Google Sheets API using the existing OAuth credentials.
+- Locates the spreadsheet by extracting the spreadsheet ID from the saved URL.
+- Detects column mapping and appends today's summary to the next empty row, preserving sheet formulas and styles.
 
 ### 4. Gmail Dispatch Stage
 - Generates an RFC 2822 compliant MIME email.

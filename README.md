@@ -1,6 +1,6 @@
 # Thalavedana 🧠
 
-A privacy-first, local-only Electron desktop application that completely automates your daily internship work reporting. It scrapes commits from your local Git repositories, synthesizes professional daily work summaries using Google Gemini, appends rows to a styled Excel journal sheet, and dispatches the summary via secure Gmail OAuth2.
+A privacy-first, local-only Electron desktop application that completely automates your daily internship work reporting. It scrapes commits from your local Git repositories, synthesizes professional daily work summaries using Google Gemini, appends rows to a Google Sheets document, and dispatches the summary via secure Gmail OAuth2.
 
 ---
 
@@ -15,7 +15,7 @@ A privacy-first, local-only Electron desktop application that completely automat
 
 ## ⚡ Key Highlights
 
-- **Live Stage Orchestration Panel**: A step-by-step progress visualizer (**Git Scrape** → **AI Summary** → **Excel Log** → **Gmail Sent**) on the dashboard shows real-time subtask status, commit volumes, and logs during automated or manual runs.
+- **Live Stage Orchestration Panel**: A step-by-step progress visualizer (**Git Scrape** → **AI Summary** → **Google Sheets** → **Gmail Sent**) on the dashboard shows real-time subtask status, commit volumes, and logs during automated or manual runs.
 - **Startup Recovery**: Computes lookback ranges on app boot to backfill and send reports for dates where the computer was turned off during scheduled run times.
 - **Auto Log Pruning**: Automatically cleans and prunes historical debug and system logs older than 30 days.
 
@@ -61,5 +61,5 @@ When starting the application for the first time, you will be guided through a S
 1. **Git Repositories**: Specify the local folder paths of repositories you work on.
 2. **LLM Provider**: Enter your Gemini API key (native support for fast and free summaries).
 3. **Gmail Credentials**: Enable Gmail API on the Google Developer Console, create an OAuth Web Client ID with redirect URI `http://localhost:5999/oauth2callback`, and authorize your account.
-4. **Excel Mapping**: Select your log spreadsheet (`.xlsx`) and map columns (e.g. Column A -> Date, Column B -> Report Summary, etc.) preserving row formats.
+4. **Google Sheets Mapping**: Paste your Google Spreadsheet URL and map columns (e.g. Column A -> Date, Column B -> Report Summary, etc.) preserving row formats.
 5. **Scheduler**: Set the daily execution time.

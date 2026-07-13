@@ -49,6 +49,7 @@ export interface LogData {
 }
 
 export interface ExcelMetaResult {
+  title?: string;
   sheets: string[];
   columnsPreview: string[];
 }

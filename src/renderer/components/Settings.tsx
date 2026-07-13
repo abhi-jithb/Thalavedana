@@ -32,11 +32,12 @@ export default function Settings({
   const [emailCc, setEmailCc] = useState(settings.emailCc || '');
   const [emailBcc, setEmailBcc] = useState(settings.emailBcc || '');
 
-  // Excel local state
-  const [excelPath, setExcelPath] = useState(settings.excelPath || '');
+  // Google Sheet state
+  const [excelPath, setExcelPath] = useState(settings.excelPath || ''); // Google Sheet URL
   const [excelSheetName, setExcelSheetName] = useState(settings.excelSheetName || '');
   const [sheetsList, setSheetsList] = useState<string[]>([]);
   const [columnsPreview, setColumnsPreview] = useState<string[]>([]);
+  const [spreadsheetTitle, setSpreadsheetTitle] = useState('');
   const [excelError, setExcelError] = useState('');
   const [excelInspecting, setExcelInspecting] = useState(false);
   const [mappings, setMappings] = useState<Array<{ col: string; type: string; fixedValue: string }>>(() => {
@@ -100,24 +101,60 @@ export default function Settings({
     showSuccessMessage('Recipients settings updated.');
   };
 
-  // Excel inspection
+  // Google Sheets detection
+  const detectColumnMappings = (columns: string[]) => {
+    const result: Array<{ col: string; type: string; fixedValue: string }> = [];
+    columns.forEach(colStr => {
+      const parts = colStr.split(': ');
+      const colLetter = parts[0]?.trim();
+      const colHeader = parts.slice(1).join(': ').trim().toLowerCase();
+      
+      if (!colLetter) return;
+
+      if (['date', 'datum', 'day'].some(k => colHeader.includes(k))) {
+        result.push({ col: colLetter, type: 'date', fixedValue: '' });
+      } else if (['report', 'summary', 'work', 'daily report', 'work report', 'details', 'tasks', 'description', 'activity'].some(k => colHeader.includes(k))) {
+        result.push({ col: colLetter, type: 'report', fixedValue: '' });
+      } else if (['repositories', 'repo', 'project', 'location', 'git'].some(k => colHeader.includes(k))) {
+        result.push({ col: colLetter, type: 'repositories', fixedValue: '' });
+      } else {
+        result.push({ col: colLetter, type: 'empty', fixedValue: '' });
+      }
+    });
+
+    return result.length > 0 ? result : [
+      { col: 'A', type: 'date', fixedValue: '' },
+      { col: 'B', type: 'report', fixedValue: '' },
+      { col: 'C', type: 'repositories', fixedValue: '' }
+    ];
+  };
+
+  // Google Sheets inspection
   const handleInspectExcel = async () => {
     setExcelError('');
+    setSpreadsheetTitle('');
+    setSheetsList([]);
+    setColumnsPreview([]);
     if (!excelPath.trim()) {
-      setExcelError('Excel file path is required.');
+      setExcelError('Google Spreadsheet URL or ID is required.');
       return;
     }
 
     setExcelInspecting(true);
     try {
       const meta = await window.thalavedana.inspectExcel(excelPath.trim());
+      setSpreadsheetTitle(meta.title || 'Google Sheet');
       setSheetsList(meta.sheets);
       setColumnsPreview(meta.columnsPreview);
       if (meta.sheets.length > 0 && !excelSheetName) {
         setExcelSheetName(meta.sheets[0] || '');
       }
+
+      // Auto map
+      const autoMappings = detectColumnMappings(meta.columnsPreview);
+      setMappings(autoMappings);
     } catch (err: any) {
-      setExcelError(err.message || 'Failed to inspect Excel. Check path.');
+      setExcelError(err.message || 'Failed to inspect Google Sheet. Verify URL and make sure Gmail/OAuth is fully authenticated.');
     } finally {
       setExcelInspecting(false);
     }
@@ -126,13 +163,13 @@ export default function Settings({
   // Save Excel configuration
   const handleSaveExcel = async () => {
     if (!excelPath.trim()) {
-      setExcelError('Excel path is required.');
+      setExcelError('Spreadsheet URL is required.');
       return;
     }
     await saveSetting('excelPath', excelPath.trim());
     await saveSetting('excelSheetName', excelSheetName);
     await saveSetting('excelColumnMapping', JSON.stringify(mappings));
-    showSuccessMessage('Excel settings saved.');
+    showSuccessMessage('Google Sheet settings saved.');
   };
 
   const handleUpdateMapping = (index: number, key: string, value: string) => {
@@ -144,11 +181,27 @@ export default function Settings({
     }
   };
 
+  const handleAddMappingRow = () => {
+    const lastCol = mappings[mappings.length - 1]?.col || '@';
+    const nextCol = String.fromCharCode(lastCol.charCodeAt(0) + 1);
+    setMappings([...mappings, { col: nextCol, type: 'empty', fixedValue: '' }]);
+  };
+
+  const handleRemoveMappingRow = (index: number) => {
+    setMappings(mappings.filter((_, i) => i !== index));
+  };
+
   // Save scheduler settings
   const handleSaveScheduler = async () => {
     await saveSetting('reportTime', reportTime);
     showSuccessMessage('Scheduler settings updated.');
   };
+
+  const hasDateMapping = mappings.some(m => m.type === 'date');
+  const hasReportMapping = mappings.some(m => m.type === 'report');
+  const mappingValidationError = !hasDateMapping || !hasReportMapping
+    ? 'Please map at least one column to "Report Date" and one to "Work Report Summary".'
+    : '';
 
   return (
     <div className="settings-page" style={{ maxWidth: '680px' }}>
@@ -163,7 +216,7 @@ export default function Settings({
       <nav className="settings-nav">
         <button className={`settings-nav__btn ${activeTab === 'llm' ? 'settings-nav__btn--active' : ''}`} onClick={() => setActiveTab('llm')}>LLM Provider</button>
         <button className={`settings-nav__btn ${activeTab === 'gmail' ? 'settings-nav__btn--active' : ''}`} onClick={() => setActiveTab('gmail')}>Gmail (OAuth)</button>
-        <button className={`settings-nav__btn ${activeTab === 'excel' ? 'settings-nav__btn--active' : ''}`} onClick={() => setActiveTab('excel')}>Excel Sheet</button>
+        <button className={`settings-nav__btn ${activeTab === 'excel' ? 'settings-nav__btn--active' : ''}`} onClick={() => setActiveTab('excel')}>Google Sheet</button>
         <button className={`settings-nav__btn ${activeTab === 'scheduler' ? 'settings-nav__btn--active' : ''}`} onClick={() => setActiveTab('scheduler')}>Scheduler</button>
       </nav>
 
@@ -300,24 +353,28 @@ export default function Settings({
 
         {activeTab === 'excel' && (
           <div className="card">
-            <h3>Excel Spreadsheet Reporting</h3>
+            <h3>Google Spreadsheet Reporting</h3>
             <p className="description">Ensure the workbook matches your daily tracking layout.</p>
 
             <form onSubmit={(e) => { e.preventDefault(); handleInspectExcel(); }} className="form-group row" style={{ marginBottom: '16px' }}>
               <input 
                 type="text" 
-                placeholder="/home/user/Internship/tracker.xlsx"
+                placeholder="https://docs.google.com/spreadsheets/d/.../edit"
                 value={excelPath}
                 onChange={(e) => setExcelPath(e.target.value)}
               />
               <button type="submit" className="btn btn--secondary" disabled={excelInspecting}>
-                {excelInspecting ? 'Inspecting...' : 'Inspect Excel'}
+                {excelInspecting ? 'Verifying...' : 'Verify Spreadsheet'}
               </button>
             </form>
             {excelError && <p className="error-text" style={{ marginBottom: '16px' }}>{excelError}</p>}
 
-            {(sheetsList.length > 0 || excelSheetName) && (
+            {sheetsList.length > 0 && (
               <div className="excel-setup-box" style={{ marginTop: '16px', padding: 0, border: 'none' }}>
+                <div style={{ marginBottom: '16px', background: 'var(--success-bg)', padding: '12px 16px', borderRadius: '8px', border: '1px solid var(--success-border)', color: 'var(--success-text)', fontSize: '13px' }}>
+                  Spreadsheet Title: <strong>{spreadsheetTitle}</strong>
+                </div>
+
                 <div className="form-field">
                   <label>Worksheet Name</label>
                   <select value={excelSheetName} onChange={(e) => setExcelSheetName(e.target.value)}>
@@ -391,9 +448,22 @@ export default function Settings({
                       ))}
                     </tbody>
                   </table>
+                  
+                  {mappingValidationError && (
+                    <div className="error-banner" style={{ marginTop: '16px', marginBottom: '16px' }}>
+                      {mappingValidationError}
+                    </div>
+                  )}
+
                   <div style={{ display: 'flex', gap: '10px', marginTop: '16px' }}>
                     <button className="btn btn--secondary btn--sm" onClick={() => setMappings([...mappings, { col: '', type: 'empty', fixedValue: '' }])}>+ Add Column</button>
-                    <button className="btn btn--primary btn--sm" onClick={handleSaveExcel}>Save Mapping & Path</button>
+                    <button 
+                      className="btn btn--primary btn--sm" 
+                      onClick={handleSaveExcel}
+                      disabled={!!mappingValidationError}
+                    >
+                      Save Mapping & URL
+                    </button>
                   </div>
                 </div>
               </div>

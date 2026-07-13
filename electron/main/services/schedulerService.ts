@@ -72,7 +72,7 @@ export async function retryPendingReports(): Promise<void> {
       const scrapeResults: RepoScrapeResult[] = JSON.parse(r.commit_data);
       const repoNames = scrapeResults.map(res => res.repoName);
 
-      // Retry Excel if failed/pending
+      // Retry Google Sheets if failed/pending
       if (r.excel_status !== 'updated') {
         const settings = getSettings();
         if (settings.excelPath) {
@@ -84,7 +84,7 @@ export async function retryPendingReports(): Promise<void> {
             });
             updateReportStatus(r.report_date, { excel_status: 'updated' });
           } catch (err: any) {
-            updateReportStatus(r.report_date, { error_message: `Excel retry error: ${err.message}` });
+            updateReportStatus(r.report_date, { error_message: `Google Sheets retry error: ${err.message}` });
           }
         }
       }

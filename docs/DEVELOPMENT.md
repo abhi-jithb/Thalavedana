@@ -15,8 +15,8 @@ cd thalavedana
 Install the required application dependencies:
 
 ```bash
-# Install Excel rendering, OAuth libraries, and LLM APIs
-npm install exceljs googleapis @google/genai
+# Install Google APIs and developer tools
+npm install googleapis @google/genai
 
 # Install developer tools and type packages
 npm install -D typescript @types/node @types/react @types/react-dom
@@ -44,7 +44,7 @@ npm run build
 ## 5. Directory Structure
 - `electron/main/`: Core application lifecycle, database migration, git service execution, and scheduler.
 - `electron/preload/`: Sandbox API definition exposing secure IPC handlers.
-- `src/renderer/`: React front-end application and custom glassmorphism stylesheet.
+- `src/renderer/`: React front-end application and minimalist light-themed styling.
 - `src/shared/`: Shared interfaces, API structures, and shared types.
 
 ## 6. Packaging for Production

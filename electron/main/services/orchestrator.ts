@@ -160,8 +160,8 @@ export class DailyReportOrchestrator {
     let emailFailed = false;
     let combinedError = '';
 
-    // --- STAGE 3: Excel Row Appender ---
-    this.updateStage(dateStr, 'excel', 'running', 'Appending summary row to Excel workbook...');
+    // --- STAGE 3: Google Sheets Row Appender ---
+    this.updateStage(dateStr, 'excel', 'running', 'Appending summary row to Google Sheets...');
     if (settings.excelPath) {
       try {
         await appendReportToExcel({
@@ -170,16 +170,16 @@ export class DailyReportOrchestrator {
           repoNames: scrapeResults.map(r => r.repoName)
         });
         updateReportStatus(dateStr, { excel_status: 'updated' });
-        this.updateStage(dateStr, 'excel', 'success', 'Workbook updated successfully.');
+        this.updateStage(dateStr, 'excel', 'success', 'Google Sheet updated successfully.');
       } catch (err: any) {
         excelFailed = true;
-        combinedError += `Excel: ${err.message}. `;
-        logToDb('ERROR', 'EXCEL', `Excel append failed: ${err.message}`);
-        updateReportStatus(dateStr, { excel_status: 'failed', error_message: `Excel error: ${err.message}` });
+        combinedError += `Google Sheets: ${err.message}. `;
+        logToDb('ERROR', 'EXCEL', `Google Sheets append failed: ${err.message}`);
+        updateReportStatus(dateStr, { excel_status: 'failed', error_message: `Google Sheets error: ${err.message}` });
         this.updateStage(dateStr, 'excel', 'failed', err.message);
       }
     } else {
-      logToDb('WARN', 'EXCEL', 'Excel template path is not configured. Skipping.');
+      logToDb('WARN', 'EXCEL', 'Google Sheets URL is not configured. Skipping.');
       updateReportStatus(dateStr, { excel_status: 'updated' });
       this.updateStage(dateStr, 'excel', 'success', 'Skipped (Not configured).');
     }

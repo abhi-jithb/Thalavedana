@@ -1,12 +1,43 @@
-import ExcelJS from 'exceljs';
-import fs from 'node:fs';
-import path from 'node:path';
+import { google } from 'googleapis';
 import { getSettings, logToDb } from '../database';
+import { getOAuth2Client } from './gmailService';
 
 export interface ColumnMapping {
   col: string; // "A", "B", "C", etc.
   type: 'date' | 'report' | 'repositories' | 'fixed' | 'empty';
   fixedValue?: string;
+}
+
+// Helper to extract Spreadsheet ID from URL or return it directly
+function extractSpreadsheetId(urlOrId: string): string {
+  if (!urlOrId) return '';
+  const match = urlOrId.match(/\/d\/([a-zA-Z0-9-_]+)/);
+  if (match && match[1]) {
+    return match[1];
+  }
+  return urlOrId.trim();
+}
+
+// Convert 0-based index to column letter (A, B, C...)
+function indexToColLetter(index: number): string {
+  let temp = index;
+  let letter = '';
+  while (temp >= 0) {
+    letter = String.fromCharCode((temp % 26) + 65) + letter;
+    temp = Math.floor(temp / 26) - 1;
+  }
+  return letter;
+}
+
+// Convert column letter (A, B, C...) to 0-based index
+function colLetterToIndex(letter: string): number {
+  let column = 0;
+  const cleanLetter = letter.toUpperCase().replace(/[^A-Z]/g, '');
+  const length = cleanLetter.length;
+  for (let i = 0; i < length; i++) {
+    column += (cleanLetter.charCodeAt(i) - 64) * Math.pow(26, length - i - 1);
+  }
+  return column - 1;
 }
 
 export async function appendReportToExcel({
@@ -19,17 +50,17 @@ export async function appendReportToExcel({
   repoNames: string[];
 }): Promise<void> {
   const settings = getSettings();
-  const filePath = settings.excelPath;
+  const spreadsheetUrlOrId = settings.excelPath; // We reuse excelPath to hold Spreadsheet URL/ID
   const sheetName = settings.excelSheetName || '';
   const mappingRaw = settings.excelColumnMapping;
 
-  if (!filePath) {
-    throw new Error('Excel file path is not configured');
+  if (!spreadsheetUrlOrId) {
+    throw new Error('Google Spreadsheet URL or ID is not configured');
   }
 
-  const resolvedPath = path.resolve(filePath);
-  if (!fs.existsSync(resolvedPath)) {
-    throw new Error(`Excel file does not exist at: ${resolvedPath}`);
+  const spreadsheetId = extractSpreadsheetId(spreadsheetUrlOrId);
+  if (!spreadsheetId) {
+    throw new Error('Invalid Google Spreadsheet URL or ID');
   }
 
   let mappings: ColumnMapping[] = [];
@@ -37,7 +68,7 @@ export async function appendReportToExcel({
     try {
       mappings = JSON.parse(mappingRaw);
     } catch (err) {
-      logToDb('ERROR', 'EXCEL', 'Failed to parse excel column mappings, using defaults');
+      logToDb('ERROR', 'EXCEL', 'Failed to parse Google Sheets column mappings, using defaults');
     }
   }
 
@@ -50,94 +81,149 @@ export async function appendReportToExcel({
     ];
   }
 
-  logToDb('INFO', 'EXCEL', `Opening Excel sheet: ${resolvedPath}`);
+  logToDb('INFO', 'EXCEL', `Connecting to Google Sheets: ${spreadsheetId}`);
 
-  const workbook = new ExcelJS.Workbook();
-  await workbook.xlsx.readFile(resolvedPath);
+  try {
+    const oauth2Client = getOAuth2Client();
+    const sheets = google.sheets({ version: 'v4', auth: oauth2Client });
 
-  // Get worksheet: either by name or the first one
-  let worksheet = workbook.worksheets[0];
-  if (sheetName) {
-    const found = workbook.getWorksheet(sheetName);
-    if (found) {
-      worksheet = found;
-    } else {
-      logToDb('WARN', 'EXCEL', `Sheet "${sheetName}" not found, using first sheet`);
-    }
-  }
-
-  if (!worksheet) {
-    throw new Error('No worksheets found in the Excel file');
-  }
-
-  const lastRow = worksheet.lastRow;
-  const nextRowNumber = lastRow ? lastRow.number + 1 : 1;
-  const newRow = worksheet.getRow(nextRowNumber);
-
-  // Copy formatting cell by cell from the previous row if it exists
-  if (lastRow) {
-    lastRow.eachCell({ includeEmpty: true }, (cell, colNumber) => {
-      const newCell = newRow.getCell(colNumber);
-      // Deep-ish copy of style object to preserve fonts, fills, borders, alignments, and number formats
-      newCell.style = JSON.parse(JSON.stringify(cell.style || {}));
+    // 1. Get sheet values to find the next empty row
+    const readResponse = await sheets.spreadsheets.values.get({
+      spreadsheetId,
+      range: `${sheetName}!A:Z`,
     });
-  }
 
-  // Calculate cell values based on mappings
-  for (const map of mappings) {
-    const cell = newRow.getCell(map.col);
-    switch (map.type) {
-      case 'date':
-        cell.value = dateStr;
-        break;
-      case 'report':
-        // Strip markdown bold/list formatting for Excel compatibility
-        const plainSummary = reportContent
-          .replace(/[\#\*\_`]/g, '') // remove markdown characters
-          .trim();
-        cell.value = plainSummary;
-        break;
-      case 'repositories':
-        cell.value = repoNames.join(', ');
-        break;
-      case 'fixed':
-        cell.value = map.fixedValue || '';
-        break;
-      case 'empty':
-      default:
-        cell.value = '';
-        break;
+    const rows = readResponse.data.values || [];
+    const nextRowNumber = rows.length + 1;
+
+    // 2. Build row data array
+    const rowData: any[] = [];
+    for (const map of mappings) {
+      const idx = colLetterToIndex(map.col);
+      if (idx < 0) continue;
+
+      let val = '';
+      switch (map.type) {
+        case 'date':
+          val = dateStr;
+          break;
+        case 'report':
+          // Strip markdown characters
+          val = reportContent.replace(/[\#\*\_`]/g, '').trim();
+          break;
+        case 'repositories':
+          val = repoNames.join(', ');
+          break;
+        case 'fixed':
+          val = map.fixedValue || '';
+          break;
+        case 'empty':
+        default:
+          val = '';
+          break;
+      }
+      rowData[idx] = val;
     }
-  }
 
-  newRow.commit();
-  await workbook.xlsx.writeFile(resolvedPath);
-  logToDb('INFO', 'EXCEL', `Excel file updated successfully at row ${nextRowNumber}`);
+    // Fill gaps
+    for (let i = 0; i < rowData.length; i++) {
+      if (rowData[i] === undefined) {
+        rowData[i] = '';
+      }
+    }
+
+    // 3. Write row data to target row number
+    const writeRange = `${sheetName}!A${nextRowNumber}`;
+    await sheets.spreadsheets.values.update({
+      spreadsheetId,
+      range: writeRange,
+      valueInputOption: 'USER_ENTERED',
+      requestBody: {
+        values: [rowData],
+      },
+    });
+
+    logToDb('INFO', 'EXCEL', `Google Sheet updated successfully at row ${nextRowNumber}`);
+  } catch (err: any) {
+    let msg = err.message || String(err);
+    if (err.status === 403 || msg.includes('Permission') || msg.includes('scope')) {
+      msg = 'Access denied. Please re-authenticate your Google account to grant Google Sheets permissions.';
+    } else if (err.status === 404 || msg.includes('not found') || msg.includes('Requested entity was not found')) {
+      msg = 'Spreadsheet not found. Please verify the URL or Spreadsheet ID.';
+    } else if (msg.includes('token expired') || msg.includes('invalid_grant')) {
+      msg = 'Google login session expired. Please re-authenticate your Google account.';
+    } else if (msg.includes('ENOTFOUND') || msg.includes('fetch') || msg.includes('network')) {
+      msg = 'Network unavailable. Please check your internet connection.';
+    } else if (err.status === 429 || msg.includes('quota')) {
+      msg = 'Google Sheets API rate limit exceeded. Please try again in a few minutes.';
+    }
+    logToDb('ERROR', 'EXCEL', `Google Sheets error: ${msg}`);
+    throw new Error(msg);
+  }
 }
 
-// Utility to inspect Excel sheets and return sheets list + preview of first few columns
-export async function getExcelMeta(filePath: string): Promise<{ sheets: string[]; columnsPreview: string[] }> {
-  const resolvedPath = path.resolve(filePath);
-  if (!fs.existsSync(resolvedPath)) {
-    throw new Error('File does not exist');
+// Utility to inspect Google Sheets worksheets list + column headers
+export async function getExcelMeta(spreadsheetUrlOrId: string): Promise<{ sheets: string[]; columnsPreview: string[] }> {
+  if (!spreadsheetUrlOrId) {
+    throw new Error('Google Spreadsheet URL or ID is not configured');
   }
 
-  const workbook = new ExcelJS.Workbook();
-  await workbook.xlsx.readFile(resolvedPath);
+  const spreadsheetId = extractSpreadsheetId(spreadsheetUrlOrId);
+  if (!spreadsheetId) {
+    throw new Error('Invalid Google Spreadsheet URL or ID');
+  }
 
-  const sheets = workbook.worksheets.map(w => w.name);
-  const firstSheet = workbook.worksheets[0];
+  try {
+    const oauth2Client = getOAuth2Client();
+    const sheets = google.sheets({ version: 'v4', auth: oauth2Client });
 
-  const columnsPreview: string[] = [];
-  if (firstSheet) {
-    // Read the first row (often headers)
-    const firstRow = firstSheet.getRow(1);
-    firstRow.eachCell({ includeEmpty: true }, (cell, colNumber) => {
-      const colLetter = firstSheet.getColumn(colNumber).letter;
-      const cellValue = cell.value ? String(cell.value) : `Column ${colLetter}`;
-      columnsPreview.push(`${colLetter}: ${cellValue}`);
+    // Fetch spreadsheet structure
+    const response = await sheets.spreadsheets.get({
+      spreadsheetId,
     });
-  }
 
-  return { sheets, columnsPreview };
+    const sheetsList = response.data.sheets?.map(s => s.properties?.title || '').filter(Boolean) || [];
+    if (sheetsList.length === 0) {
+      throw new Error('No worksheets found in this spreadsheet.');
+    }
+
+    // Fetch column headers of the first sheet
+    const targetSheet = sheetsList[0];
+    const valuesResponse = await sheets.spreadsheets.values.get({
+      spreadsheetId,
+      range: `${targetSheet}!1:1`,
+    });
+
+    const firstRow = valuesResponse.data.values?.[0] || [];
+    const columnsPreview: string[] = [];
+    
+    // If first row is empty, provide placeholder columns
+    if (firstRow.length === 0) {
+      columnsPreview.push('A: Date');
+      columnsPreview.push('B: Report');
+      columnsPreview.push('C: Repositories');
+    } else {
+      firstRow.forEach((val, idx) => {
+        const colLetter = indexToColLetter(idx);
+        columnsPreview.push(`${colLetter}: ${val}`);
+      });
+    }
+
+    return { sheets: sheetsList, columnsPreview };
+  } catch (err: any) {
+    let msg = err.message || String(err);
+    if (err.status === 403 || msg.includes('Permission') || msg.includes('scope')) {
+      msg = 'Access denied. Please re-authenticate your Google account to grant Google Sheets permissions.';
+    } else if (err.status === 404 || msg.includes('not found') || msg.includes('Requested entity was not found')) {
+      msg = 'Spreadsheet not found. Please verify the URL or Spreadsheet ID.';
+    } else if (msg.includes('token expired') || msg.includes('invalid_grant')) {
+      msg = 'Google login session expired. Please re-authenticate your Google account.';
+    } else if (msg.includes('ENOTFOUND') || msg.includes('fetch') || msg.includes('network')) {
+      msg = 'Network unavailable. Please check your internet connection.';
+    } else if (err.status === 429 || msg.includes('quota')) {
+      msg = 'Google Sheets API rate limit exceeded. Please try again in a few minutes.';
+    }
+    logToDb('ERROR', 'EXCEL', `Google Sheets error: ${msg}`);
+    throw new Error(msg);
+  }
 }
