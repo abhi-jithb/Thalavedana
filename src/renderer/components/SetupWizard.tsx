@@ -1,0 +1,566 @@
+import React, { useState } from 'react';
+import type { 
+  SettingsData, 
+  RepositoryData 
+} from '../../shared/api';
+
+interface SetupWizardProps {
+  settings: SettingsData;
+  repos: RepositoryData[];
+  saveSetting: (key: keyof SettingsData, value: string) => Promise<void>;
+  addRepo: (path: string) => Promise<{ ok: boolean; name?: string; error?: string }>;
+  removeRepo: (id: number) => Promise<void>;
+  connectGmail: () => Promise<{ email: string }>;
+  refreshAll: () => Promise<void>;
+}
+
+export default function SetupWizard({
+  settings,
+  repos,
+  saveSetting,
+  addRepo,
+  removeRepo,
+  connectGmail,
+  refreshAll,
+}: SetupWizardProps) {
+  const [currentStep, setCurrentStep] = useState(1);
+  const [repoPathInput, setRepoPathInput] = useState('');
+  const [repoError, setRepoError] = useState('');
+  const [repoLoading, setRepoLoading] = useState(false);
+
+  // LLM State
+  const [llmProvider, setLlmProvider] = useState(settings.llmProvider || 'gemini');
+  const [geminiApiKey, setGeminiApiKey] = useState(settings.geminiApiKey || '');
+  const [llmModel, setLlmModel] = useState(settings.llmModel || '');
+  const [llmEndpoint, setLlmEndpoint] = useState(settings.llmEndpoint || '');
+
+  // Gmail OAuth State
+  const [gmailClientId, setGmailClientId] = useState(settings.gmailClientId || '');
+  const [gmailClientSecret, setGmailClientSecret] = useState(settings.gmailClientSecret || '');
+  const [gmailLoading, setGmailLoading] = useState(false);
+  const [gmailError, setGmailError] = useState('');
+
+  // Recipients
+  const [emailTo, setEmailTo] = useState(settings.emailTo || '');
+  const [emailCc, setEmailCc] = useState(settings.emailCc || '');
+  const [emailBcc, setEmailBcc] = useState(settings.emailBcc || '');
+
+  // Excel Mapping
+  const [excelPath, setExcelPath] = useState(settings.excelPath || '');
+  const [excelSheetName, setExcelSheetName] = useState(settings.excelSheetName || '');
+  const [sheetsList, setSheetsList] = useState<string[]>([]);
+  const [columnsPreview, setColumnsPreview] = useState<string[]>([]);
+  const [excelError, setExcelError] = useState('');
+  const [excelInspecting, setExcelInspecting] = useState(false);
+  
+  // Custom column mapping states
+  const [mappings, setMappings] = useState<Array<{ col: string; type: string; fixedValue: string }>>(() => {
+    if (settings.excelColumnMapping) {
+      try {
+        return JSON.parse(settings.excelColumnMapping);
+      } catch (e) {}
+    }
+    return [
+      { col: 'A', type: 'date', fixedValue: '' },
+      { col: 'B', type: 'report', fixedValue: '' },
+      { col: 'C', type: 'repositories', fixedValue: '' },
+    ];
+  });
+
+  // Time
+  const [reportTime, setReportTime] = useState(settings.reportTime || '17:30');
+
+  // Step 1: Add Git Repository
+  const handleAddRepo = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setRepoError('');
+    if (!repoPathInput.trim()) return;
+
+    setRepoLoading(true);
+    try {
+      const res = await addRepo(repoPathInput.trim());
+      if (res.ok) {
+        setRepoPathInput('');
+      } else {
+        setRepoError(res.error || 'Failed to add repository.');
+      }
+    } catch (err: any) {
+      setRepoError(err.message || 'An error occurred.');
+    } finally {
+      setRepoLoading(false);
+    }
+  };
+
+  // Step 2: Save LLM settings
+  const handleSaveLLM = async () => {
+    await saveSetting('llmProvider', llmProvider);
+    await saveSetting('geminiApiKey', geminiApiKey);
+    await saveSetting('llmModel', llmModel);
+    await saveSetting('llmEndpoint', llmEndpoint);
+    setCurrentStep(3);
+  };
+
+  // Step 3: Gmail Connect
+  const handleConnectGmail = async () => {
+    setGmailError('');
+    if (!gmailClientId.trim() || !gmailClientSecret.trim()) {
+      setGmailError('OAuth Client ID and Client Secret are required.');
+      return;
+    }
+
+    setGmailLoading(true);
+    try {
+      // Save client details first
+      await saveSetting('gmailClientId', gmailClientId.trim());
+      await saveSetting('gmailClientSecret', gmailClientSecret.trim());
+      
+      // Connect Gmail via OAuth2
+      await connectGmail();
+    } catch (err: any) {
+      setGmailError(err.message || 'OAuth authentication failed.');
+    } finally {
+      setGmailLoading(false);
+    }
+  };
+
+  // Step 4: Save Recipients
+  const handleSaveRecipients = async () => {
+    await saveSetting('emailTo', emailTo);
+    await saveSetting('emailCc', emailCc);
+    await saveSetting('emailBcc', emailBcc);
+    setCurrentStep(5);
+  };
+
+  // Step 5: Excel inspection
+  const handleInspectExcel = async () => {
+    setExcelError('');
+    if (!excelPath.trim()) {
+      setExcelError('Excel file path is required.');
+      return;
+    }
+
+    setExcelInspecting(true);
+    try {
+      // Verify sheet and read properties
+      const meta = await window.thalavedana.inspectExcel(excelPath.trim());
+      setSheetsList(meta.sheets);
+      setColumnsPreview(meta.columnsPreview);
+      if (meta.sheets.length > 0 && !excelSheetName) {
+        setExcelSheetName(meta.sheets[0] || '');
+      }
+    } catch (err: any) {
+      setExcelError(err.message || 'Failed to open Excel file. Verify path.');
+    } finally {
+      setExcelInspecting(false);
+    }
+  };
+
+  // Save Excel column mapping
+  const handleSaveExcel = async () => {
+    if (!excelPath.trim()) {
+      setExcelError('Excel file path is required.');
+      return;
+    }
+    await saveSetting('excelPath', excelPath.trim());
+    await saveSetting('excelSheetName', excelSheetName);
+    await saveSetting('excelColumnMapping', JSON.stringify(mappings));
+    setCurrentStep(6);
+  };
+
+  const handleUpdateMapping = (index: number, key: string, value: string) => {
+    const updated = [...mappings];
+    const item = updated[index];
+    if (item) {
+      updated[index] = { ...item, [key]: value } as any;
+      setMappings(updated);
+    }
+  };
+
+  const handleAddMappingRow = () => {
+    // Find next column letter (A, B, C...)
+    const lastCol = mappings[mappings.length - 1]?.col || '@';
+    const nextCol = String.fromCharCode(lastCol.charCodeAt(0) + 1);
+    setMappings([...mappings, { col: nextCol, type: 'empty', fixedValue: '' }]);
+  };
+
+  const handleRemoveMappingRow = (index: number) => {
+    setMappings(mappings.filter((_, i) => i !== index));
+  };
+
+  // Step 6: Complete Wizard
+  const handleCompleteSetup = async () => {
+    await saveSetting('reportTime', reportTime);
+    await saveSetting('setupCompleted', 'true');
+    await refreshAll();
+  };
+
+  return (
+    <div className="wizard">
+      <div className="wizard__progress">
+        {[1, 2, 3, 4, 5, 6].map((step) => (
+          <div 
+            key={step} 
+            className={`wizard__dot ${step === currentStep ? 'wizard__dot--active' : ''} ${step < currentStep ? 'wizard__dot--complete' : ''}`}
+            onClick={() => step < currentStep && setCurrentStep(step)}
+          >
+            {step}
+          </div>
+        ))}
+      </div>
+
+      <div className="wizard__content">
+        {currentStep === 1 && (
+          <div>
+            <h2>Step 1: Select Internship Git Repositories</h2>
+            <p className="wizard__tip">
+              Add the local paths to the Git repositories you work in. Thalavedana will only parse commits from these folders.
+            </p>
+
+            <form onSubmit={handleAddRepo} className="form-group row">
+              <input 
+                type="text" 
+                placeholder="/home/user/Projects/my-app"
+                value={repoPathInput}
+                onChange={(e) => setRepoPathInput(e.target.value)}
+                disabled={repoLoading}
+              />
+              <button type="submit" className="btn btn--primary" disabled={repoLoading}>
+                {repoLoading ? 'Verifying...' : 'Add'}
+              </button>
+            </form>
+            {repoError && <p className="error-text">{repoError}</p>}
+
+            <div className="repo-list">
+              <h4>Configured Repositories ({repos.length})</h4>
+              {repos.length === 0 ? (
+                <p className="repo-list__empty">No repositories configured yet.</p>
+              ) : (
+                repos.map((repo) => (
+                  <div key={repo.id} className="repo-item">
+                    <div>
+                      <strong>{repo.name}</strong>
+                      <span className="repo-item__path">{repo.path}</span>
+                    </div>
+                    <button className="btn btn--danger btn--sm" onClick={() => removeRepo(repo.id)}>Delete</button>
+                  </div>
+                ))
+              )}
+            </div>
+
+            <div className="wizard__actions">
+              <button 
+                className="btn btn--primary btn--lg" 
+                onClick={() => setCurrentStep(2)}
+                disabled={repos.length === 0}
+              >
+                Continue
+              </button>
+            </div>
+          </div>
+        )}
+
+        {currentStep === 2 && (
+          <div>
+            <h2>Step 2: Configure Gemini API Key</h2>
+            <p className="wizard__tip">
+              Configure your Gemini (or OpenAI-compatible) API credentials. Secrets are stored locally in SQLite.
+            </p>
+
+            <div className="form-field">
+              <label>LLM Provider</label>
+              <select value={llmProvider} onChange={(e) => setLlmProvider(e.target.value)}>
+                <option value="gemini">Google Gemini (Native API)</option>
+                <option value="openai-compatible">OpenAI-Compatible (e.g. Groq, Local LLM, custom)</option>
+              </select>
+            </div>
+
+            <div className="form-field">
+              <label>API Key</label>
+              <input 
+                type="password" 
+                placeholder="Paste API key here..."
+                value={geminiApiKey}
+                onChange={(e) => setGeminiApiKey(e.target.value)}
+              />
+            </div>
+
+            <div className="form-field">
+              <label>Model (Optional)</label>
+              <input 
+                type="text" 
+                placeholder={llmProvider === 'gemini' ? 'gemini-1.5-flash' : 'gpt-4o-mini'}
+                value={llmModel}
+                onChange={(e) => setLlmModel(e.target.value)}
+              />
+            </div>
+
+            {llmProvider === 'openai-compatible' && (
+              <div className="form-field">
+                <label>Endpoint URL (Required for Custom Providers)</label>
+                <input 
+                  type="text" 
+                  placeholder="https://api.groq.com/openai/v1/chat/completions"
+                  value={llmEndpoint}
+                  onChange={(e) => setLlmEndpoint(e.target.value)}
+                />
+              </div>
+            )}
+
+            <div className="wizard__actions">
+              <button className="btn btn--secondary" onClick={() => setCurrentStep(1)}>Back</button>
+              <button 
+                className="btn btn--primary btn--lg" 
+                onClick={handleSaveLLM}
+                disabled={!geminiApiKey}
+              >
+                Continue
+              </button>
+            </div>
+          </div>
+        )}
+
+        {currentStep === 3 && (
+          <div>
+            <h2>Step 3: Connect Gmail Account</h2>
+            <p className="wizard__tip">
+              We require Google OAuth to safely send daily emails. Create credentials in your Google Cloud Console (enable Gmail API, create OAuth 2.0 Web application, set Authorized redirect URI to <code>http://localhost:5999/oauth2callback</code>).
+            </p>
+
+            <div className="form-field">
+              <label>Google OAuth Client ID</label>
+              <input 
+                type="text" 
+                placeholder="xxxxxxxx-xxxxxx.apps.googleusercontent.com"
+                value={gmailClientId}
+                onChange={(e) => setGmailClientId(e.target.value)}
+              />
+            </div>
+
+            <div className="form-field">
+              <label>Google OAuth Client Secret</label>
+              <input 
+                type="password" 
+                placeholder="Client Secret key..."
+                value={gmailClientSecret}
+                onChange={(e) => setGmailClientSecret(e.target.value)}
+              />
+            </div>
+
+            {gmailError && <p className="error-text">{gmailError}</p>}
+
+            <div className="auth-connection-status">
+              {settings.gmailUserEmail ? (
+                <div className="success-banner">
+                  Connected Gmail: <strong>{settings.gmailUserEmail}</strong>
+                </div>
+              ) : (
+                <button 
+                  className="btn btn--accent btn--lg" 
+                  onClick={handleConnectGmail} 
+                  disabled={gmailLoading}
+                >
+                  {gmailLoading ? 'Listening for login redirection...' : 'Authenticate with Google'}
+                </button>
+              )}
+            </div>
+
+            <div className="wizard__actions">
+              <button className="btn btn--secondary" onClick={() => setCurrentStep(2)}>Back</button>
+              <button 
+                className="btn btn--primary btn--lg" 
+                onClick={() => setCurrentStep(4)}
+                disabled={!settings.gmailUserEmail}
+              >
+                Continue
+              </button>
+            </div>
+          </div>
+        )}
+
+        {currentStep === 4 && (
+          <div>
+            <h2>Step 4: Configure Email Recipients</h2>
+            <p className="wizard__tip">
+              Set the destination and CC/BCC emails for the work reports. Separate multiple emails with commas.
+            </p>
+
+            <div className="form-field">
+              <label>To (Recipients)</label>
+              <input 
+                type="text" 
+                placeholder="manager@company.com, supervisor@company.com"
+                value={emailTo}
+                onChange={(e) => setEmailTo(e.target.value)}
+              />
+            </div>
+
+            <div className="form-field">
+              <label>Cc (Carbon Copy)</label>
+              <input 
+                type="text" 
+                placeholder="cc@company.com"
+                value={emailCc}
+                onChange={(e) => setEmailCc(e.target.value)}
+              />
+            </div>
+
+            <div className="form-field">
+              <label>Bcc (Blind Carbon Copy)</label>
+              <input 
+                type="text" 
+                placeholder="my-personal-backup@gmail.com"
+                value={emailBcc}
+                onChange={(e) => setEmailBcc(e.target.value)}
+              />
+            </div>
+
+            <div className="wizard__actions">
+              <button className="btn btn--secondary" onClick={() => setCurrentStep(3)}>Back</button>
+              <button 
+                className="btn btn--primary btn--lg" 
+                onClick={handleSaveRecipients}
+                disabled={!emailTo}
+              >
+                Continue
+              </button>
+            </div>
+          </div>
+        )}
+
+        {currentStep === 5 && (
+          <div>
+            <h2>Step 5: Setup Excel Template & Mappings</h2>
+            <p className="wizard__tip">
+              Input the path to your internship Excel report file. Once loaded, you can map spreadsheet columns to specific report outputs.
+            </p>
+
+            <form onSubmit={(e) => { e.preventDefault(); handleInspectExcel(); }} className="form-group row">
+              <input 
+                type="text" 
+                placeholder="/home/user/Internship/report_log.xlsx"
+                value={excelPath}
+                onChange={(e) => setExcelPath(e.target.value)}
+                disabled={excelInspecting}
+              />
+              <button type="submit" className="btn btn--secondary" disabled={excelInspecting}>
+                {excelInspecting ? 'Loading...' : 'Inspect File'}
+              </button>
+            </form>
+            {excelError && <p className="error-text">{excelError}</p>}
+
+            {sheetsList.length > 0 && (
+              <div className="excel-setup-box">
+                <div className="form-field">
+                  <label>Select Target Worksheet</label>
+                  <select value={excelSheetName} onChange={(e) => setExcelSheetName(e.target.value)}>
+                    {sheetsList.map(s => <option key={s} value={s}>{s}</option>)}
+                  </select>
+                </div>
+
+                <div className="excel-columns-preview">
+                  <strong>First Row Headers Preview:</strong>
+                  <div className="preview-tags">
+                    {columnsPreview.map((c, i) => (
+                      <span key={i} className="preview-tag">{c}</span>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="mapping-table">
+                  <h4>Column Configuration Mapping</h4>
+                  <table className="table">
+                    <thead>
+                      <tr>
+                        <th>Excel Col</th>
+                        <th>Source Field</th>
+                        <th>Fixed Text Value</th>
+                        <th>Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {mappings.map((m, i) => (
+                        <tr key={i}>
+                          <td>
+                            <input 
+                              type="text" 
+                              value={m.col} 
+                              onChange={(e) => handleUpdateMapping(i, 'col', e.target.value.toUpperCase())}
+                              style={{ width: '60px', textAlign: 'center' }}
+                            />
+                          </td>
+                          <td>
+                            <select 
+                              value={m.type} 
+                              onChange={(e) => handleUpdateMapping(i, 'type', e.target.value)}
+                            >
+                              <option value="date">Report Date (YYYY-MM-DD)</option>
+                              <option value="report">LLM Work Report Summary</option>
+                              <option value="repositories">Configured Repositories</option>
+                              <option value="fixed">Fixed Static String</option>
+                              <option value="empty">Leave Cell Blank</option>
+                            </select>
+                          </td>
+                          <td>
+                            {m.type === 'fixed' ? (
+                              <input 
+                                type="text" 
+                                placeholder="Fixed text..."
+                                value={m.fixedValue}
+                                onChange={(e) => handleUpdateMapping(i, 'fixedValue', e.target.value)}
+                              />
+                            ) : (
+                              <span className="dimmed">Not applicable</span>
+                            )}
+                          </td>
+                          <td>
+                            <button className="btn btn--danger btn--sm" onClick={() => handleRemoveMappingRow(i)}>Remove</button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                  <button className="btn btn--secondary btn--sm" onClick={handleAddMappingRow}>+ Add Column Mapping</button>
+                </div>
+              </div>
+            )}
+
+            <div className="wizard__actions">
+              <button className="btn btn--secondary" onClick={() => setCurrentStep(4)}>Back</button>
+              <button 
+                className="btn btn--primary btn--lg" 
+                onClick={handleSaveExcel}
+              >
+                Continue
+              </button>
+            </div>
+          </div>
+        )}
+
+        {currentStep === 6 && (
+          <div>
+            <h2>Step 6: Report Generation Time</h2>
+            <p className="wizard__tip">
+              Thalavedana is designed for zero background CPU overhead. Git timestamps are parsed, and the scheduler executes precisely at this time daily.
+            </p>
+
+            <div className="form-field" style={{ maxWidth: '200px' }}>
+              <label>Execution Time</label>
+              <input 
+                type="time" 
+                value={reportTime} 
+                onChange={(e) => setReportTime(e.target.value)}
+              />
+            </div>
+
+            <div className="wizard__actions">
+              <button className="btn btn--secondary" onClick={() => setCurrentStep(5)}>Back</button>
+              <button className="btn btn--accent btn--lg" onClick={handleCompleteSetup}>
+                Finish Setup
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
