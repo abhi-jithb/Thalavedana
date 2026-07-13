@@ -1,8 +1,5 @@
 import React, { useState } from 'react';
-import type { 
-  SettingsData, 
-  RepositoryData 
-} from '../../shared/api';
+import type { SettingsData, RepositoryData } from '../../shared/api';
 
 interface SetupWizardProps {
   settings: SettingsData;
@@ -110,11 +107,8 @@ export default function SetupWizard({
 
     setGmailLoading(true);
     try {
-      // Save client details first
       await saveSetting('gmailClientId', gmailClientId.trim());
       await saveSetting('gmailClientSecret', gmailClientSecret.trim());
-      
-      // Connect Gmail via OAuth2
       await connectGmail();
     } catch (err: any) {
       setGmailError(err.message || 'OAuth authentication failed.');
@@ -141,7 +135,6 @@ export default function SetupWizard({
 
     setExcelInspecting(true);
     try {
-      // Verify sheet and read properties
       const meta = await window.thalavedana.inspectExcel(excelPath.trim());
       setSheetsList(meta.sheets);
       setColumnsPreview(meta.columnsPreview);
@@ -177,7 +170,6 @@ export default function SetupWizard({
   };
 
   const handleAddMappingRow = () => {
-    // Find next column letter (A, B, C...)
     const lastCol = mappings[mappings.length - 1]?.col || '@';
     const nextCol = String.fromCharCode(lastCol.charCodeAt(0) + 1);
     setMappings([...mappings, { col: nextCol, type: 'empty', fixedValue: '' }]);
@@ -208,18 +200,18 @@ export default function SetupWizard({
         ))}
       </div>
 
-      <div className="wizard__content">
+      <div className="wizard__content card">
         {currentStep === 1 && (
           <div>
-            <h2>Step 1: Select Internship Git Repositories</h2>
+            <h2>Select Git Repositories</h2>
             <p className="wizard__tip">
-              Add the local paths to the Git repositories you work in. Thalavedana will only parse commits from these folders.
+              Add the absolute paths to the local Git repositories you wish to scan.
             </p>
 
             <form onSubmit={handleAddRepo} className="form-group row">
               <input 
                 type="text" 
-                placeholder="/home/user/Projects/my-app"
+                placeholder="e.g. /home/username/Projects/my-app"
                 value={repoPathInput}
                 onChange={(e) => setRepoPathInput(e.target.value)}
                 disabled={repoLoading}
@@ -233,23 +225,26 @@ export default function SetupWizard({
             <div className="repo-list">
               <h4>Configured Repositories ({repos.length})</h4>
               {repos.length === 0 ? (
-                <p className="repo-list__empty">No repositories configured yet.</p>
+                <p className="repo-list__empty">No repositories added yet.</p>
               ) : (
-                repos.map((repo) => (
-                  <div key={repo.id} className="repo-item">
-                    <div>
-                      <strong>{repo.name}</strong>
-                      <span className="repo-item__path">{repo.path}</span>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                  {repos.map((repo) => (
+                    <div key={repo.id} className="repo-item" style={{ margin: 0 }}>
+                      <div>
+                        <strong>{repo.name}</strong>
+                        <span className="repo-item__path">{repo.path}</span>
+                      </div>
+                      <button className="btn btn--danger btn--sm" onClick={() => removeRepo(repo.id)}>Delete</button>
                     </div>
-                    <button className="btn btn--danger btn--sm" onClick={() => removeRepo(repo.id)}>Delete</button>
-                  </div>
-                ))
+                  ))}
+                </div>
               )}
             </div>
 
             <div className="wizard__actions">
+              <div />
               <button 
-                className="btn btn--primary btn--lg" 
+                className="btn btn--primary" 
                 onClick={() => setCurrentStep(2)}
                 disabled={repos.length === 0}
               >
@@ -261,16 +256,16 @@ export default function SetupWizard({
 
         {currentStep === 2 && (
           <div>
-            <h2>Step 2: Configure Gemini API Key</h2>
+            <h2>Configure Gemini API Key</h2>
             <p className="wizard__tip">
-              Configure your Gemini (or OpenAI-compatible) API credentials. Secrets are stored locally in SQLite.
+              Provide credentials for generating summaries. Secrets are stored locally using hardware encryption.
             </p>
 
             <div className="form-field">
               <label>LLM Provider</label>
               <select value={llmProvider} onChange={(e) => setLlmProvider(e.target.value)}>
                 <option value="gemini">Google Gemini (Native API)</option>
-                <option value="openai-compatible">OpenAI-Compatible (e.g. Groq, Local LLM, custom)</option>
+                <option value="openai-compatible">OpenAI-Compatible (Groq, local LLMs)</option>
               </select>
             </div>
 
@@ -296,10 +291,10 @@ export default function SetupWizard({
 
             {llmProvider === 'openai-compatible' && (
               <div className="form-field">
-                <label>Endpoint URL (Required for Custom Providers)</label>
+                <label>Endpoint URL</label>
                 <input 
                   type="text" 
-                  placeholder="https://api.groq.com/openai/v1/chat/completions"
+                  placeholder="https://api.openai.com/v1/chat/completions"
                   value={llmEndpoint}
                   onChange={(e) => setLlmEndpoint(e.target.value)}
                 />
@@ -309,7 +304,7 @@ export default function SetupWizard({
             <div className="wizard__actions">
               <button className="btn btn--secondary" onClick={() => setCurrentStep(1)}>Back</button>
               <button 
-                className="btn btn--primary btn--lg" 
+                className="btn btn--primary" 
                 onClick={handleSaveLLM}
                 disabled={!geminiApiKey}
               >
@@ -321,16 +316,16 @@ export default function SetupWizard({
 
         {currentStep === 3 && (
           <div>
-            <h2>Step 3: Connect Gmail Account</h2>
+            <h2>Connect Gmail Account</h2>
             <p className="wizard__tip">
-              We require Google OAuth to safely send daily emails. Create credentials in your Google Cloud Console (enable Gmail API, create OAuth 2.0 Web application, set Authorized redirect URI to <code>http://localhost:5999/oauth2callback</code>).
+              Add Google OAuth credentials to dispatch reports. Make sure your redirect URI is set to <code>http://localhost:5999/oauth2callback</code>.
             </p>
 
             <div className="form-field">
               <label>Google OAuth Client ID</label>
               <input 
                 type="text" 
-                placeholder="xxxxxxxx-xxxxxx.apps.googleusercontent.com"
+                placeholder="Paste Client ID..."
                 value={gmailClientId}
                 onChange={(e) => setGmailClientId(e.target.value)}
               />
@@ -340,7 +335,7 @@ export default function SetupWizard({
               <label>Google OAuth Client Secret</label>
               <input 
                 type="password" 
-                placeholder="Client Secret key..."
+                placeholder="Paste Client Secret..."
                 value={gmailClientSecret}
                 onChange={(e) => setGmailClientSecret(e.target.value)}
               />
@@ -348,18 +343,18 @@ export default function SetupWizard({
 
             {gmailError && <p className="error-text">{gmailError}</p>}
 
-            <div className="auth-connection-status">
+            <div className="auth-connection-status" style={{ margin: '16px 0' }}>
               {settings.gmailUserEmail ? (
                 <div className="success-banner">
                   Connected Gmail: <strong>{settings.gmailUserEmail}</strong>
                 </div>
               ) : (
                 <button 
-                  className="btn btn--accent btn--lg" 
+                  className="btn btn--secondary" 
                   onClick={handleConnectGmail} 
                   disabled={gmailLoading}
                 >
-                  {gmailLoading ? 'Listening for login redirection...' : 'Authenticate with Google'}
+                  {gmailLoading ? 'Waiting for redirection...' : 'Authenticate Google Account'}
                 </button>
               )}
             </div>
@@ -367,7 +362,7 @@ export default function SetupWizard({
             <div className="wizard__actions">
               <button className="btn btn--secondary" onClick={() => setCurrentStep(2)}>Back</button>
               <button 
-                className="btn btn--primary btn--lg" 
+                className="btn btn--primary" 
                 onClick={() => setCurrentStep(4)}
                 disabled={!settings.gmailUserEmail}
               >
@@ -379,9 +374,9 @@ export default function SetupWizard({
 
         {currentStep === 4 && (
           <div>
-            <h2>Step 4: Configure Email Recipients</h2>
+            <h2>Configure Email Recipients</h2>
             <p className="wizard__tip">
-              Set the destination and CC/BCC emails for the work reports. Separate multiple emails with commas.
+              Specify where reports are delivered. Comma-separate multiple targets.
             </p>
 
             <div className="form-field">
@@ -408,7 +403,7 @@ export default function SetupWizard({
               <label>Bcc (Blind Carbon Copy)</label>
               <input 
                 type="text" 
-                placeholder="my-personal-backup@gmail.com"
+                placeholder="backup@company.com"
                 value={emailBcc}
                 onChange={(e) => setEmailBcc(e.target.value)}
               />
@@ -417,7 +412,7 @@ export default function SetupWizard({
             <div className="wizard__actions">
               <button className="btn btn--secondary" onClick={() => setCurrentStep(3)}>Back</button>
               <button 
-                className="btn btn--primary btn--lg" 
+                className="btn btn--primary" 
                 onClick={handleSaveRecipients}
                 disabled={!emailTo}
               >
@@ -429,15 +424,15 @@ export default function SetupWizard({
 
         {currentStep === 5 && (
           <div>
-            <h2>Step 5: Setup Excel Template & Mappings</h2>
+            <h2>Setup Excel Template</h2>
             <p className="wizard__tip">
-              Input the path to your internship Excel report file. Once loaded, you can map spreadsheet columns to specific report outputs.
+              Select your spreadsheet file. You can map workbook columns directly to the report variables.
             </p>
 
-            <form onSubmit={(e) => { e.preventDefault(); handleInspectExcel(); }} className="form-group row">
+            <form onSubmit={(e) => { e.preventDefault(); handleInspectExcel(); }} className="form-group row" style={{ marginBottom: '16px' }}>
               <input 
                 type="text" 
-                placeholder="/home/user/Internship/report_log.xlsx"
+                placeholder="e.g. /home/username/Internship/report.xlsx"
                 value={excelPath}
                 onChange={(e) => setExcelPath(e.target.value)}
                 disabled={excelInspecting}
@@ -449,16 +444,16 @@ export default function SetupWizard({
             {excelError && <p className="error-text">{excelError}</p>}
 
             {sheetsList.length > 0 && (
-              <div className="excel-setup-box">
+              <div className="excel-setup-box" style={{ padding: 0, border: 'none' }}>
                 <div className="form-field">
-                  <label>Select Target Worksheet</label>
+                  <label>Select Worksheet</label>
                   <select value={excelSheetName} onChange={(e) => setExcelSheetName(e.target.value)}>
                     {sheetsList.map(s => <option key={s} value={s}>{s}</option>)}
                   </select>
                 </div>
 
                 <div className="excel-columns-preview">
-                  <strong>First Row Headers Preview:</strong>
+                  <strong>First Row Preview:</strong>
                   <div className="preview-tags">
                     {columnsPreview.map((c, i) => (
                       <span key={i} className="preview-tag">{c}</span>
@@ -466,15 +461,15 @@ export default function SetupWizard({
                   </div>
                 </div>
 
-                <div className="mapping-table">
+                <div className="mapping-table" style={{ marginTop: '16px' }}>
                   <h4>Column Configuration Mapping</h4>
                   <table className="table">
                     <thead>
                       <tr>
                         <th>Excel Col</th>
                         <th>Source Field</th>
-                        <th>Fixed Text Value</th>
-                        <th>Actions</th>
+                        <th>Fixed Value</th>
+                        <th></th>
                       </tr>
                     </thead>
                     <tbody>
@@ -485,7 +480,7 @@ export default function SetupWizard({
                               type="text" 
                               value={m.col} 
                               onChange={(e) => handleUpdateMapping(i, 'col', e.target.value.toUpperCase())}
-                              style={{ width: '60px', textAlign: 'center' }}
+                              style={{ width: '50px', textAlign: 'center', padding: '6px' }}
                             />
                           </td>
                           <td>
@@ -507,6 +502,7 @@ export default function SetupWizard({
                                 placeholder="Fixed text..."
                                 value={m.fixedValue}
                                 onChange={(e) => handleUpdateMapping(i, 'fixedValue', e.target.value)}
+                                style={{ width: '100px', padding: '6px' }}
                               />
                             ) : (
                               <span className="dimmed">Not applicable</span>
@@ -519,7 +515,7 @@ export default function SetupWizard({
                       ))}
                     </tbody>
                   </table>
-                  <button className="btn btn--secondary btn--sm" onClick={handleAddMappingRow}>+ Add Column Mapping</button>
+                  <button className="btn btn--secondary btn--sm" style={{ marginTop: '12px' }} onClick={handleAddMappingRow}>+ Add Column</button>
                 </div>
               </div>
             )}
@@ -527,7 +523,7 @@ export default function SetupWizard({
             <div className="wizard__actions">
               <button className="btn btn--secondary" onClick={() => setCurrentStep(4)}>Back</button>
               <button 
-                className="btn btn--primary btn--lg" 
+                className="btn btn--primary" 
                 onClick={handleSaveExcel}
               >
                 Continue
@@ -538,9 +534,9 @@ export default function SetupWizard({
 
         {currentStep === 6 && (
           <div>
-            <h2>Step 6: Report Generation Time</h2>
+            <h2>Report Generation Time</h2>
             <p className="wizard__tip">
-              Thalavedana is designed for zero background CPU overhead. Git timestamps are parsed, and the scheduler executes precisely at this time daily.
+              Choose the scheduled local time for automated executions daily.
             </p>
 
             <div className="form-field" style={{ maxWidth: '200px' }}>
@@ -554,7 +550,7 @@ export default function SetupWizard({
 
             <div className="wizard__actions">
               <button className="btn btn--secondary" onClick={() => setCurrentStep(5)}>Back</button>
-              <button className="btn btn--accent btn--lg" onClick={handleCompleteSetup}>
+              <button className="btn btn--primary" onClick={handleCompleteSetup}>
                 Finish Setup
               </button>
             </div>

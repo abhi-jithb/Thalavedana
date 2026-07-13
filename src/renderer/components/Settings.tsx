@@ -1,34 +1,19 @@
 import React, { useState } from 'react';
-import type { 
-  SettingsData, 
-  RepositoryData 
-} from '../../shared/api';
+import type { SettingsData } from '../../shared/api';
 
 interface SettingsProps {
   settings: SettingsData;
-  repos: RepositoryData[];
   saveSetting: (key: keyof SettingsData, value: string) => Promise<void>;
-  addRepo: (path: string) => Promise<{ ok: boolean; name?: string; error?: string }>;
-  removeRepo: (id: number) => Promise<void>;
   connectGmail: () => Promise<{ email: string }>;
   refreshAll: () => Promise<void>;
 }
 
 export default function Settings({
   settings,
-  repos,
   saveSetting,
-  addRepo,
-  removeRepo,
   connectGmail,
-  refreshAll,
 }: SettingsProps) {
-  const [activeTab, setActiveTab] = useState<'repos' | 'llm' | 'gmail' | 'excel' | 'scheduler'>('repos');
-
-  // Repos local state
-  const [repoPathInput, setRepoPathInput] = useState('');
-  const [repoError, setRepoError] = useState('');
-  const [repoLoading, setRepoLoading] = useState(false);
+  const [activeTab, setActiveTab] = useState<'llm' | 'gmail' | 'excel' | 'scheduler'>('llm');
 
   // LLM local state
   const [llmProvider, setLlmProvider] = useState(settings.llmProvider || 'gemini');
@@ -76,28 +61,6 @@ export default function Settings({
   const showSuccessMessage = (msg: string) => {
     setSaveSuccess(msg);
     setTimeout(() => setSaveSuccess(''), 3000);
-  };
-
-  // Add Repository
-  const handleAddRepo = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setRepoError('');
-    if (!repoPathInput.trim()) return;
-
-    setRepoLoading(true);
-    try {
-      const res = await addRepo(repoPathInput.trim());
-      if (res.ok) {
-        setRepoPathInput('');
-        showSuccessMessage('Repository added successfully.');
-      } else {
-        setRepoError(res.error || 'Failed to add repository.');
-      }
-    } catch (err: any) {
-      setRepoError(err.message || 'An error occurred.');
-    } finally {
-      setRepoLoading(false);
-    }
   };
 
   // Save LLM configuration
@@ -188,14 +151,16 @@ export default function Settings({
   };
 
   return (
-    <div className="settings-page">
+    <div className="settings-page" style={{ maxWidth: '680px' }}>
       <div className="settings-page__header">
-        <h2>Configuration Settings</h2>
+        <div>
+          <h2 className="page-title">Settings</h2>
+          <p className="page-subtitle">Configure credentials, spreadsheet maps, schedules, and targets.</p>
+        </div>
         {saveSuccess && <span className="save-toast">{saveSuccess}</span>}
       </div>
 
       <nav className="settings-nav">
-        <button className={`settings-nav__btn ${activeTab === 'repos' ? 'settings-nav__btn--active' : ''}`} onClick={() => setActiveTab('repos')}>Git Repos</button>
         <button className={`settings-nav__btn ${activeTab === 'llm' ? 'settings-nav__btn--active' : ''}`} onClick={() => setActiveTab('llm')}>LLM Provider</button>
         <button className={`settings-nav__btn ${activeTab === 'gmail' ? 'settings-nav__btn--active' : ''}`} onClick={() => setActiveTab('gmail')}>Gmail (OAuth)</button>
         <button className={`settings-nav__btn ${activeTab === 'excel' ? 'settings-nav__btn--active' : ''}`} onClick={() => setActiveTab('excel')}>Excel Sheet</button>
@@ -203,41 +168,8 @@ export default function Settings({
       </nav>
 
       <div className="settings-content">
-        {activeTab === 'repos' && (
-          <div>
-            <h3>Git Repositories Scraped</h3>
-            <p className="description">Manage the folders whose git commits are analyzed daily.</p>
-
-            <form onSubmit={handleAddRepo} className="form-group row">
-              <input 
-                type="text" 
-                placeholder="/home/user/Projects/web_client"
-                value={repoPathInput}
-                onChange={(e) => setRepoPathInput(e.target.value)}
-                disabled={repoLoading}
-              />
-              <button type="submit" className="btn btn--primary" disabled={repoLoading}>
-                {repoLoading ? 'Verifying...' : 'Add Repo'}
-              </button>
-            </form>
-            {repoError && <p className="error-text">{repoError}</p>}
-
-            <div className="repo-list" style={{ marginTop: '20px' }}>
-              {repos.map((repo) => (
-                <div key={repo.id} className="repo-item">
-                  <div>
-                    <strong>{repo.name}</strong>
-                    <span className="repo-item__path">{repo.path}</span>
-                  </div>
-                  <button className="btn btn--danger btn--sm" onClick={() => removeRepo(repo.id)}>Remove</button>
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
-
         {activeTab === 'llm' && (
-          <div>
+          <div className="card">
             <h3>LLM Generation Engine</h3>
             <p className="description">Choose between Google Gemini or OpenAI compatible providers.</p>
 
@@ -281,16 +213,16 @@ export default function Settings({
               </div>
             )}
 
-            <button className="btn btn--primary btn--lg" onClick={handleSaveLLM}>Save LLM Settings</button>
+            <button className="btn btn--primary" style={{ marginTop: '8px' }} onClick={handleSaveLLM}>Save LLM Settings</button>
           </div>
         )}
 
         {activeTab === 'gmail' && (
-          <div>
-            <h3>Gmail OAuth Credentials & Recipients</h3>
-            <p className="description">Review the OAuth tokens and edit the recipient list.</p>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
+            <div className="card">
+              <h3>Gmail OAuth Credentials</h3>
+              <p className="description">Review details for Google OAuth listener loopback.</p>
 
-            <div className="form-group row-fields" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px', marginBottom: '20px' }}>
               <div className="form-field">
                 <label>OAuth Client ID</label>
                 <input 
@@ -300,6 +232,7 @@ export default function Settings({
                   onChange={(e) => setGmailClientId(e.target.value)}
                 />
               </div>
+              
               <div className="form-field">
                 <label>OAuth Client Secret</label>
                 <input 
@@ -309,66 +242,68 @@ export default function Settings({
                   onChange={(e) => setGmailClientSecret(e.target.value)}
                 />
               </div>
-            </div>
 
-            {gmailError && <p className="error-text">{gmailError}</p>}
+              {gmailError && <p className="error-text" style={{ marginBottom: '12px' }}>{gmailError}</p>}
 
-            <div className="auth-connection-status" style={{ marginBottom: '30px' }}>
-              {settings.gmailUserEmail ? (
-                <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
-                  <div className="success-banner" style={{ flexGrow: 1 }}>
-                    Connected account: <strong>{settings.gmailUserEmail}</strong>
+              <div className="auth-connection-status">
+                {settings.gmailUserEmail ? (
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                    <div className="success-banner" style={{ flexGrow: 1 }}>
+                      Connected account: <strong>{settings.gmailUserEmail}</strong>
+                    </div>
+                    <button className="btn btn--secondary" onClick={handleConnectGmail}>Re-connect</button>
                   </div>
-                  <button className="btn btn--secondary" onClick={handleConnectGmail}>Re-connect</button>
-                </div>
-              ) : (
-                <button className="btn btn--accent btn--lg" onClick={handleConnectGmail} disabled={gmailLoading}>
-                  {gmailLoading ? 'Awaiting authorization...' : 'Authorize Gmail Account'}
-                </button>
-              )}
+                ) : (
+                  <button className="btn btn--primary" onClick={handleConnectGmail} disabled={gmailLoading}>
+                    {gmailLoading ? 'Awaiting authorization...' : 'Authorize Gmail Account'}
+                  </button>
+                )}
+              </div>
             </div>
 
-            <hr style={{ border: 'none', borderTop: '1px solid var(--border)', margin: '20px 0' }} />
+            <div className="card">
+              <h3>Email Delivery Targets</h3>
+              <p className="description">Edit default recipient and copy addresses.</p>
 
-            <h3>Email Delivery Targets</h3>
-            <div className="form-field">
-              <label>To (Recipients, comma-separated)</label>
-              <input 
-                type="text" 
-                placeholder="manager@org.com, supervisor@org.com"
-                value={emailTo}
-                onChange={(e) => setEmailTo(e.target.value)}
-              />
-            </div>
-            <div className="form-field">
-              <label>Cc (Carbon Copy)</label>
-              <input 
-                type="text" 
-                placeholder="internship@org.com"
-                value={emailCc}
-                onChange={(e) => setEmailCc(e.target.value)}
-              />
-            </div>
-            <div className="form-field">
-              <label>Bcc (Blind Carbon Copy)</label>
-              <input 
-                type="text" 
-                placeholder="backup@gmail.com"
-                value={emailBcc}
-                onChange={(e) => setEmailBcc(e.target.value)}
-              />
-            </div>
+              <div className="form-field">
+                <label>To (Recipients, comma-separated)</label>
+                <input 
+                  type="text" 
+                  placeholder="manager@org.com, supervisor@org.com"
+                  value={emailTo}
+                  onChange={(e) => setEmailTo(e.target.value)}
+                />
+              </div>
+              <div className="form-field">
+                <label>Cc (Carbon Copy)</label>
+                <input 
+                  type="text" 
+                  placeholder="internship@org.com"
+                  value={emailCc}
+                  onChange={(e) => setEmailCc(e.target.value)}
+                />
+              </div>
+              <div className="form-field">
+                <label>Bcc (Blind Carbon Copy)</label>
+                <input 
+                  type="text" 
+                  placeholder="backup@gmail.com"
+                  value={emailBcc}
+                  onChange={(e) => setEmailBcc(e.target.value)}
+                />
+              </div>
 
-            <button className="btn btn--primary btn--lg" onClick={handleSaveRecipients}>Save Email Targets</button>
+              <button className="btn btn--primary" onClick={handleSaveRecipients}>Save Email Targets</button>
+            </div>
           </div>
         )}
 
         {activeTab === 'excel' && (
-          <div>
+          <div className="card">
             <h3>Excel Spreadsheet Reporting</h3>
             <p className="description">Ensure the workbook matches your daily tracking layout.</p>
 
-            <form onSubmit={(e) => { e.preventDefault(); handleInspectExcel(); }} className="form-group row">
+            <form onSubmit={(e) => { e.preventDefault(); handleInspectExcel(); }} className="form-group row" style={{ marginBottom: '16px' }}>
               <input 
                 type="text" 
                 placeholder="/home/user/Internship/tracker.xlsx"
@@ -379,10 +314,10 @@ export default function Settings({
                 {excelInspecting ? 'Inspecting...' : 'Inspect Excel'}
               </button>
             </form>
-            {excelError && <p className="error-text">{excelError}</p>}
+            {excelError && <p className="error-text" style={{ marginBottom: '16px' }}>{excelError}</p>}
 
             {(sheetsList.length > 0 || excelSheetName) && (
-              <div className="excel-setup-box" style={{ marginTop: '20px' }}>
+              <div className="excel-setup-box" style={{ marginTop: '16px', padding: 0, border: 'none' }}>
                 <div className="form-field">
                   <label>Worksheet Name</label>
                   <select value={excelSheetName} onChange={(e) => setExcelSheetName(e.target.value)}>
@@ -402,15 +337,15 @@ export default function Settings({
                   </div>
                 )}
 
-                <div className="mapping-table">
+                <div className="mapping-table" style={{ marginTop: '24px' }}>
                   <h4>Column Configuration Mapping</h4>
                   <table className="table">
                     <thead>
                       <tr>
-                        <th>Excel Col</th>
+                        <th>Col</th>
                         <th>Source Field</th>
-                        <th>Fixed Text Value</th>
-                        <th>Actions</th>
+                        <th>Fixed Value</th>
+                        <th></th>
                       </tr>
                     </thead>
                     <tbody>
@@ -421,7 +356,7 @@ export default function Settings({
                               type="text" 
                               value={m.col} 
                               onChange={(e) => handleUpdateMapping(i, 'col', e.target.value.toUpperCase())}
-                              style={{ width: '60px', textAlign: 'center' }}
+                              style={{ width: '50px', padding: '6px', textAlign: 'center' }}
                             />
                           </td>
                           <td>
@@ -443,6 +378,7 @@ export default function Settings({
                                 placeholder="Fixed string..."
                                 value={m.fixedValue}
                                 onChange={(e) => handleUpdateMapping(i, 'fixedValue', e.target.value)}
+                                style={{ width: '120px', padding: '6px' }}
                               />
                             ) : (
                               <span className="dimmed">Not applicable</span>
@@ -455,7 +391,7 @@ export default function Settings({
                       ))}
                     </tbody>
                   </table>
-                  <div style={{ display: 'flex', gap: '10px', marginTop: '10px' }}>
+                  <div style={{ display: 'flex', gap: '10px', marginTop: '16px' }}>
                     <button className="btn btn--secondary btn--sm" onClick={() => setMappings([...mappings, { col: '', type: 'empty', fixedValue: '' }])}>+ Add Column</button>
                     <button className="btn btn--primary btn--sm" onClick={handleSaveExcel}>Save Mapping & Path</button>
                   </div>
@@ -466,7 +402,7 @@ export default function Settings({
         )}
 
         {activeTab === 'scheduler' && (
-          <div>
+          <div className="card">
             <h3>Scheduler Configurations</h3>
             <p className="description">Execution settings for automatic generation.</p>
 
@@ -479,7 +415,7 @@ export default function Settings({
               />
             </div>
 
-            <button className="btn btn--primary btn--lg" onClick={handleSaveScheduler}>Save Scheduler Settings</button>
+            <button className="btn btn--primary" onClick={handleSaveScheduler}>Save Scheduler Settings</button>
           </div>
         )}
       </div>

@@ -28,7 +28,6 @@ export default function Dashboard({
     return localDate.toISOString().split('T')[0] || '';
   });
 
-  const [expandedReportId, setExpandedReportId] = useState<number | null>(null);
   const [triggerLoading, setTriggerLoading] = useState(false);
   const [triggerError, setTriggerError] = useState('');
   const [triggerSuccess, setTriggerSuccess] = useState(false);
@@ -61,9 +60,7 @@ export default function Dashboard({
     };
   }, [selectedDate]);
 
-  // Stats calculations
   const totalRepos = repos.length;
-  const lastReportDate = reports[0]?.report_date || 'Never';
   const pendingDeliveries = reports.filter(
     r => r.excel_status !== 'updated' || r.email_status !== 'sent'
   ).length;
@@ -87,60 +84,6 @@ export default function Dashboard({
     }
   };
 
-  const getOverallColor = (status: string) => {
-    if (status === 'success') return '#40c057';
-    if (status === 'failed') return '#fa5252';
-    if (status === 'running') return '#228be6';
-    return '#868e96';
-  };
-
-  const renderStage = (title: string, stage: { status: string; message?: string }) => {
-    const getStageColor = (s: string) => {
-      if (s === 'success') return '#40c057';
-      if (s === 'failed') return '#fa5252';
-      if (s === 'running') return '#228be6';
-      return 'rgba(255, 255, 255, 0.15)';
-    };
-
-    const getStageStatusLabel = (s: string) => {
-      if (s === 'success') return '✓ Success';
-      if (s === 'failed') return '✗ Failed';
-      if (s === 'running') return '⚡ Running';
-      return '○ Pending';
-    };
-
-    return (
-      <div className="stage-card" style={{
-        padding: '12px',
-        borderRadius: '6px',
-        border: '1px solid',
-        borderColor: getStageColor(stage.status),
-        background: 'rgba(0, 0, 0, 0.2)',
-        textAlign: 'center'
-      }}>
-        <div style={{ fontSize: '11px', fontWeight: 'bold', textTransform: 'uppercase', color: '#9fb1ce', marginBottom: '4px' }}>{title}</div>
-        <div style={{ fontSize: '13px', fontWeight: 'bold', color: getStageColor(stage.status) }}>
-          {getStageStatusLabel(stage.status)}
-        </div>
-        {stage.message && (
-          <div 
-            style={{ 
-              fontSize: '11px', 
-              color: '#9fb1ce', 
-              marginTop: '4px',
-              overflow: 'hidden', 
-              textOverflow: 'ellipsis', 
-              whiteSpace: 'nowrap' 
-            }} 
-            title={stage.message}
-          >
-            {stage.message}
-          </div>
-        )}
-      </div>
-    );
-  };
-
   const handleRetryQueue = async () => {
     setRetryLoading(true);
     try {
@@ -152,231 +95,283 @@ export default function Dashboard({
     }
   };
 
-  const getStatusPillClass = (status: string) => {
-    switch (status) {
-      case 'updated':
-      case 'sent':
-        return 'status-pill--success';
-      case 'failed':
-        return 'status-pill--failed';
-      default:
-        return 'status-pill--pending';
+  const getGreeting = () => {
+    const hr = new Date().getHours();
+    if (hr < 12) return '👋 Good Morning';
+    if (hr < 18) return '👋 Good Afternoon';
+    return '👋 Good Evening';
+  };
+
+  const gitReady = totalRepos > 0;
+  const geminiConnected = !!settings.geminiApiKey;
+  const gmailConnected = !!settings.gmailUserEmail;
+  const excelReady = !!settings.excelPath;
+  const allReady = gitReady && geminiConnected && gmailConnected && excelReady;
+
+  const getLastReportLabel = () => {
+    if (reports.length === 0) return 'Never';
+    const last = reports[0];
+    if (!last) return 'Never';
+    const date = new Date(last.created_at);
+    return `${date.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })} at ${date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`;
+  };
+
+  const getNextScheduledLabel = () => {
+    if (!settings.reportTime) return 'Not scheduled';
+    const [hrs, mins] = settings.reportTime.split(':').map(Number);
+    if (hrs === undefined || mins === undefined) return 'Not scheduled';
+    
+    const now = new Date();
+    const scheduled = new Date();
+    scheduled.setHours(hrs, mins, 0, 0);
+    
+    if (now.getTime() > scheduled.getTime()) {
+      scheduled.setDate(scheduled.getDate() + 1);
+      return `Tomorrow at ${scheduled.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`;
+    } else {
+      return `Today at ${scheduled.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`;
     }
   };
 
-  const parseEmailContent = (content: string) => {
-    try {
-      const parsed = JSON.parse(content);
-      return { subject: parsed.subject, body: parsed.body };
-    } catch (e) {
-      return { subject: 'Daily Work Report', body: content };
+  const renderTimelineItem = (
+    title: string,
+    desc: string,
+    stage: { status: string; message?: string } | undefined
+  ) => {
+    const status = stage?.status || 'idle';
+    const message = stage?.message;
+
+    let iconColor = '#D4D4D4';
+    let iconContent = (
+      <div style={{ width: '8px', height: '8px', borderRadius: '50%', background: '#D4D4D4' }} />
+    );
+
+    if (status === 'success') {
+      iconColor = 'var(--success-text)';
+      iconContent = (
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
+          <polyline points="20 6 9 17 4 12" />
+        </svg>
+      );
+    } else if (status === 'failed') {
+      iconColor = 'var(--danger-text)';
+      iconContent = (
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
+          <line x1="18" y1="6" x2="6" y2="18" />
+          <line x1="6" y1="6" x2="18" y2="18" />
+        </svg>
+      );
+    } else if (status === 'running') {
+      iconColor = 'var(--running-text)';
+      iconContent = (
+        <div className="pulse-dot" style={{
+          width: '8px',
+          height: '8px',
+          borderRadius: '50%',
+          background: 'var(--running-text)',
+          animation: 'pulse 1.2s infinite'
+        }} />
+      );
     }
+
+    return (
+      <div style={{ display: 'flex', gap: '16px', position: 'relative' }}>
+        <style dangerouslySetInnerHTML={{__html: `
+          @keyframes pulse {
+            0% { transform: scale(0.9); opacity: 0.6; }
+            50% { transform: scale(1.3); opacity: 1; }
+            100% { transform: scale(0.9); opacity: 0.6; }
+          }
+        `}} />
+        
+        {/* Left vertical bullet column */}
+        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
+          <div style={{
+            width: '24px',
+            height: '24px',
+            borderRadius: '50%',
+            border: '2px solid',
+            borderColor: iconColor,
+            background: '#FFFFFF',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            zIndex: 2,
+            color: iconColor
+          }}>
+            {iconContent}
+          </div>
+          <div style={{
+            width: '2px',
+            flexGrow: 1,
+            background: 'var(--border-light)',
+            margin: '4px 0',
+            minHeight: '24px',
+            zIndex: 1
+          }} />
+        </div>
+
+        {/* Right text content */}
+        <div style={{ paddingBottom: '20px', flexGrow: 1 }}>
+          <div style={{ fontWeight: '600', fontSize: '13px', color: 'var(--text-main)' }}>{title}</div>
+          <div style={{ fontSize: '12px', color: 'var(--text-muted)' }}>{desc}</div>
+          {message && (
+            <div style={{ 
+              fontSize: '11px', 
+              color: status === 'failed' ? 'var(--danger-text)' : 'var(--text-muted)', 
+              background: 'var(--accent-light)',
+              padding: '6px 10px',
+              borderRadius: '6px',
+              marginTop: '6px',
+              display: 'inline-block'
+            }}>
+              {message}
+            </div>
+          )}
+        </div>
+      </div>
+    );
   };
 
   return (
     <div className="dashboard">
-      {/* Stats row */}
-      <div className="grid">
-        <section className="card">
-          <p className="card__title">Git Repositories</p>
-          <strong className="card__value">{totalRepos}</strong>
-          <p className="card__caption">Scoped locations</p>
-        </section>
-
-        <section className="card">
-          <p className="card__title">Scheduled time</p>
-          <strong className="card__value">{settings.reportTime || '17:30'}</strong>
-          <p className="card__caption">Daily automated run</p>
-        </section>
-
-        <section className="card">
-          <p className="card__title">Pending Deliveries</p>
-          <strong className="card__value" style={{ color: pendingDeliveries > 0 ? '#ffd43b' : 'inherit' }}>
-            {pendingDeliveries}
-          </strong>
-          <p className="card__caption">
-            {pendingDeliveries > 0 ? (
-              <button 
-                className="btn btn--link btn--sm" 
-                style={{ padding: 0, textDecoration: 'underline' }} 
-                onClick={handleRetryQueue}
-                disabled={retryLoading}
-              >
-                {retryLoading ? 'Retrying...' : 'Retry Queue Now'}
-              </button>
-            ) : (
-              'All tasks synced'
-            )}
-          </p>
-        </section>
+      <div style={{ marginBottom: '32px' }}>
+        <h2 className="page-title">{getGreeting()}</h2>
+        <p className="page-subtitle">
+          {allReady ? 'Everything is configured and operational.' : 'Configure the wizard in system settings to complete setup.'}
+        </p>
       </div>
 
-      {/* Manual Trigger Panel */}
-      <div className="card manual-trigger-box" style={{ marginTop: '20px' }}>
-        <h3>Manual Report Execution</h3>
-        <p className="description">Run the Git-scraper and report delivery pipeline immediately for any calendar date.</p>
+      {/* Grid: Indicators & Schedules */}
+      <div className="grid">
+        {/* Indicators Card */}
+        <div className="card" style={{ display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
+          <span className="card__title">Connection Status</span>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginTop: '12px' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <span style={{ fontSize: '13px', color: 'var(--text-muted)' }}>Git Repos</span>
+              <span className={`status-pill ${gitReady ? 'status-pill--success' : 'status-pill--failed'}`} style={{ padding: '2px 8px', fontSize: '10px' }}>
+                {gitReady ? '✓ Scoped' : '× Missing'}
+              </span>
+            </div>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <span style={{ fontSize: '13px', color: 'var(--text-muted)' }}>Gemini</span>
+              <span className={`status-pill ${geminiConnected ? 'status-pill--success' : 'status-pill--failed'}`} style={{ padding: '2px 8px', fontSize: '10px' }}>
+                {geminiConnected ? '✓ Connected' : '× Config'}
+              </span>
+            </div>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <span style={{ fontSize: '13px', color: 'var(--text-muted)' }}>Gmail Auth</span>
+              <span className={`status-pill ${gmailConnected ? 'status-pill--success' : 'status-pill--failed'}`} style={{ padding: '2px 8px', fontSize: '10px' }}>
+                {gmailConnected ? '✓ Secure' : '× Authorize'}
+              </span>
+            </div>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <span style={{ fontSize: '13px', color: 'var(--text-muted)' }}>Excel Map</span>
+              <span className={`status-pill ${excelReady ? 'status-pill--success' : 'status-pill--failed'}`} style={{ padding: '2px 8px', fontSize: '10px' }}>
+                {excelReady ? '✓ Ready' : '× Select'}
+              </span>
+            </div>
+          </div>
+        </div>
+
+        {/* Last execution information */}
+        <div className="card" style={{ display: 'flex', flexDirection: 'column', justifyContent: 'space-between' }}>
+          <div>
+            <span className="card__title">Last Report Logged</span>
+            <strong className="card__value" style={{ display: 'block', marginTop: '8px', fontSize: '20px' }}>
+              {reports[0]?.report_date || 'Never'}
+            </strong>
+          </div>
+          <span className="card__caption" style={{ color: 'var(--text-muted)' }}>
+            {getLastReportLabel()}
+          </span>
+        </div>
+
+        {/* Schedule settings */}
+        <div className="card" style={{ display: 'flex', flexDirection: 'column', justifyContent: 'space-between' }}>
+          <div>
+            <span className="card__title">Next Scheduled Run</span>
+            <strong className="card__value" style={{ display: 'block', marginTop: '8px', fontSize: '20px' }}>
+              {settings.reportTime || '17:30'}
+            </strong>
+          </div>
+          <span className="card__caption" style={{ color: 'var(--text-muted)' }}>
+            {getNextScheduledLabel()}
+          </span>
+        </div>
+      </div>
+
+      {/* Main Action area: Run now & Pipeline progress */}
+      <div style={{ display: 'grid', gridTemplateColumns: '1.2fr 1fr', gap: '24px', alignItems: 'start' }}>
         
-        <div className="form-group row" style={{ display: 'flex', gap: '16px', alignItems: 'center' }}>
-          <input 
-            type="date" 
-            value={selectedDate} 
-            onChange={(e) => setSelectedDate(e.target.value)}
-            disabled={triggerLoading || (pipelineStatus?.overall === 'running')}
-            style={{ width: '220px' }}
-          />
+        {/* Manual launch card */}
+        <div className="card">
+          <h3>Manual Execution</h3>
+          <p className="description">Select a date to trigger report scraping, AI summaries, journal logs, and email dispatches immediately.</p>
+          
+          <div className="form-field" style={{ marginBottom: '16px' }}>
+            <label>Report Date</label>
+            <input 
+              type="date" 
+              value={selectedDate} 
+              onChange={(e) => setSelectedDate(e.target.value)}
+              disabled={triggerLoading || (pipelineStatus?.overall === 'running')}
+            />
+          </div>
+
           <button 
-            className="btn btn--primary" 
+            className="btn btn--primary btn--lg" 
+            style={{ width: '100%' }}
             onClick={handleManualTrigger}
             disabled={triggerLoading || totalRepos === 0 || (pipelineStatus?.overall === 'running')}
           >
-            {triggerLoading || (pipelineStatus?.overall === 'running') ? 'Processing Automation...' : 'Trigger Report'}
+            {triggerLoading || (pipelineStatus?.overall === 'running') ? 'Running pipeline...' : 'Run Now'}
           </button>
+
+          {triggerError && <p className="error-text" style={{ marginTop: '12px' }}>{triggerError}</p>}
+          {triggerSuccess && <p className="success-text" style={{ marginTop: '12px' }}>✓ Automation run completed successfully!</p>}
+          
+          {pendingDeliveries > 0 && (
+            <div style={{ marginTop: '20px', borderTop: '1px solid var(--border-light)', paddingTop: '16px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>{pendingDeliveries} pending deliveries in queue</span>
+              <button 
+                className="btn btn--secondary btn--sm" 
+                onClick={handleRetryQueue}
+                disabled={retryLoading}
+              >
+                {retryLoading ? 'Retrying...' : 'Retry Pending'}
+              </button>
+            </div>
+          )}
         </div>
 
-        {triggerError && <p className="error-text" style={{ marginTop: '10px' }}>{triggerError}</p>}
-        {triggerSuccess && <p className="success-text" style={{ marginTop: '10px' }}>✓ Automation run completed successfully!</p>}
-
-        {/* Live Pipeline Flow Panel */}
+        {/* Pipeline status visualizer */}
         {pipelineStatus && pipelineStatus.overall !== 'idle' && (
-          <div className="pipeline-flow" style={{ 
-            marginTop: '20px', 
-            padding: '16px', 
-            background: 'rgba(255, 255, 255, 0.02)', 
-            borderRadius: '8px', 
-            border: '1px solid var(--border)' 
-          }}>
-            <h4 style={{ margin: 0, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <span>Live Status Flow</span>
-              <span style={{ 
-                fontSize: '12px', 
-                textTransform: 'uppercase', 
-                padding: '2px 8px', 
-                borderRadius: '4px',
-                background: 'rgba(255, 255, 255, 0.05)',
-                color: getOverallColor(pipelineStatus.overall) 
-              }}>{pipelineStatus.overall}</span>
-            </h4>
-            
-            <div className="stages-grid" style={{ 
-              display: 'grid', 
-              gridTemplateColumns: 'repeat(4, 1fr)', 
-              gap: '12px', 
-              marginTop: '14px' 
-            }}>
-              {renderStage('Git Scrape', pipelineStatus.git)}
-              {renderStage('AI Summary', pipelineStatus.ai)}
-              {renderStage('Excel Log', pipelineStatus.excel)}
-              {renderStage('Gmail Sent', pipelineStatus.gmail)}
+          <div className="card" style={{ background: '#FFFFFF' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
+              <h3 style={{ margin: 0 }}>Pipeline Activity</h3>
+              <span className={`status-pill ${
+                pipelineStatus.overall === 'success' ? 'status-pill--success' :
+                pipelineStatus.overall === 'failed' ? 'status-pill--failed' : 'status-pill--pending'
+              }`} style={{ fontSize: '10px' }}>
+                {pipelineStatus.overall}
+              </span>
+            </div>
+
+            <div style={{ display: 'flex', flexDirection: 'column' }}>
+              {renderTimelineItem('Git Scrape', 'Monitored repository scanning', pipelineStatus.git)}
+              {renderTimelineItem('AI Summary', 'Formulating work summary via Gemini', pipelineStatus.ai)}
+              {renderTimelineItem('Excel Log', 'Adding entries to spreadsheet', pipelineStatus.excel)}
+              {renderTimelineItem('Gmail Sent', 'Delivering email updates via Gmail', pipelineStatus.gmail)}
             </div>
 
             {pipelineStatus.errorMessage && (
-              <div className="error-text" style={{ 
-                marginTop: '12px', 
-                padding: '8px', 
-                background: 'rgba(250, 82, 82, 0.1)', 
-                borderRadius: '4px', 
-                fontSize: '12px',
-                border: '1px solid rgba(250, 82, 82, 0.2)'
-              }}>
-                <strong>Failed stages error message:</strong> {pipelineStatus.errorMessage}
+              <div className="error-banner" style={{ marginTop: '12px', fontSize: '12px' }}>
+                <strong>Error:</strong> {pipelineStatus.errorMessage}
               </div>
             )}
           </div>
-        )}
-      </div>
-
-      {/* Report History */}
-      <div className="report-history" style={{ marginTop: '28px' }}>
-        <h3>Report History ({reports.length})</h3>
-        
-        {reports.length === 0 ? (
-          <p className="dimmed">No work reports logged yet. Automated schedules will list here.</p>
-        ) : (
-          reports.map((report) => {
-            const isExpanded = expandedReportId === report.id;
-            const emailData = parseEmailContent(report.email_content);
-
-            return (
-              <div 
-                key={report.id} 
-                className={`report-card ${isExpanded ? 'report-card--expanded' : ''}`}
-              >
-                <div 
-                  className="report-card__header" 
-                  onClick={() => setExpandedReportId(isExpanded ? null : report.id)}
-                >
-                  <div className="report-card__title-box">
-                    <span className="report-card__date">{report.report_date}</span>
-                    <span className="report-card__sub">Generated: {new Date(report.created_at).toLocaleTimeString()}</span>
-                  </div>
-
-                  <div className="report-card__status-box">
-                    <span className={`status-pill ${getStatusPillClass(report.excel_status)}`}>
-                      Excel: {report.excel_status}
-                    </span>
-                    <span className={`status-pill ${getStatusPillClass(report.email_status)}`}>
-                      Gmail: {report.email_status === 'sent' ? 'Sent' : report.email_status}
-                    </span>
-                  </div>
-                </div>
-
-                {isExpanded && (
-                  <div className="report-card__body">
-                    {report.error_message && (
-                      <div className="error-banner" style={{ marginBottom: '16px' }}>
-                        <strong>Error details:</strong> {report.error_message}
-                        <button 
-                          className="btn btn--secondary btn--sm" 
-                          style={{ marginLeft: '16px', float: 'right' }} 
-                          onClick={async () => {
-                            setTriggerLoading(true);
-                            await generateForDate(report.report_date);
-                            setTriggerLoading(false);
-                          }}
-                        >
-                          Retry Re-run
-                        </button>
-                        <div style={{ clear: 'both' }}></div>
-                      </div>
-                    )}
-
-                    <div className="report-sections">
-                      <div className="report-section">
-                        <h4>Work Report Draft (Markdown)</h4>
-                        <div className="markdown-body">
-                          {report.report_content ? (
-                            <pre style={{ whiteSpace: 'pre-wrap', fontFamily: 'inherit' }}>{report.report_content}</pre>
-                          ) : (
-                            <p className="dimmed">No content generated. Check errors.</p>
-                          )}
-                        </div>
-                      </div>
-
-                      <div className="report-section">
-                        <h4>Gmail Draft HTML Preview</h4>
-                        <div className="email-preview-box">
-                          <div className="email-preview-subject">
-                            <strong>Subject:</strong> {emailData.subject}
-                          </div>
-                          <div 
-                            className="email-preview-html"
-                            dangerouslySetInnerHTML={{ __html: emailData.body }}
-                          />
-                        </div>
-                      </div>
-
-                      <div className="report-section">
-                        <h4>Commit Metadata Parsed</h4>
-                        <div className="commits-preview-box">
-                          <pre>{JSON.stringify(JSON.parse(report.commit_data), null, 2)}</pre>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                )}
-              </div>
-            );
-          })
         )}
       </div>
     </div>
