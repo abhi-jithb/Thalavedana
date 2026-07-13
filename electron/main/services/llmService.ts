@@ -84,6 +84,21 @@ You MUST respond ONLY with a raw JSON object containing these keys:
   logToDb('INFO', 'LLM', `Sending query to LLM provider: ${provider} (Model: ${model})`);
 
   if (provider === 'gemini') {
+    try {
+      const listUrl = `https://generativelanguage.googleapis.com/v1beta/models?key=${apiKey}`;
+      const listRes = await fetch(listUrl);
+      if (listRes.ok) {
+        const listData = await listRes.json();
+        const names = listData.models?.map((m: any) => m.name) || [];
+        console.log("DEBUG: Available Gemini Models for this API Key:", names);
+        logToDb('INFO', 'LLM', `DEBUG: Available Gemini Models: ${names.join(', ')}`);
+      } else {
+        console.error("DEBUG: Failed to list Gemini models. Status:", listRes.status, await listRes.text());
+      }
+    } catch (listErr: any) {
+      console.error("DEBUG: Error listing Gemini models:", listErr.message);
+    }
+
     const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
     const response = await fetch(url, {
       method: 'POST',
