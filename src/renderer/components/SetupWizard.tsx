@@ -389,8 +389,11 @@ export default function SetupWizard({
 
             <div className="auth-connection-status" style={{ margin: '16px 0' }}>
               {settings.gmailUserEmail ? (
-                <div className="success-banner">
-                  Connected Gmail: <strong>{settings.gmailUserEmail}</strong>
+                <div className="success-banner" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%', gap: '10px' }}>
+                  <span>Connected Gmail: <strong>{settings.gmailUserEmail}</strong></span>
+                  <button className="btn btn--secondary btn--sm" onClick={handleConnectGmail} disabled={gmailLoading}>
+                    {gmailLoading ? 'Re-connecting...' : 'Re-connect'}
+                  </button>
                 </div>
               ) : (
                 <button 
@@ -485,7 +488,32 @@ export default function SetupWizard({
                 {excelInspecting ? 'Connecting...' : 'Verify Spreadsheet'}
               </button>
             </form>
-            {excelError && <p className="error-text" style={{ marginBottom: '16px' }}>{excelError}</p>}
+            
+            {excelError && (
+              <div style={{ marginBottom: '16px' }}>
+                <p className="error-text" style={{ marginBottom: '8px' }}>{excelError}</p>
+                {excelError.includes('Access denied') && (
+                  <button 
+                    type="button" 
+                    className="btn btn--primary btn--sm" 
+                    onClick={async () => {
+                      setExcelError('');
+                      setExcelInspecting(true);
+                      try {
+                        await connectGmail();
+                        setTimeout(() => handleInspectExcel(), 2000);
+                      } catch (err: any) {
+                        setExcelError(`Authorization failed: ${err.message}`);
+                      } finally {
+                        setExcelInspecting(false);
+                      }
+                    }}
+                  >
+                    Authorize Google Sheets Access
+                  </button>
+                )}
+              </div>
+            )}
 
             {sheetsList.length > 0 && (
               <div className="excel-setup-box" style={{ padding: 0, border: 'none' }}>

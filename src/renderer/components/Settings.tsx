@@ -367,7 +367,32 @@ export default function Settings({
                 {excelInspecting ? 'Verifying...' : 'Verify Spreadsheet'}
               </button>
             </form>
-            {excelError && <p className="error-text" style={{ marginBottom: '16px' }}>{excelError}</p>}
+            
+            {excelError && (
+              <div style={{ marginBottom: '16px' }}>
+                <p className="error-text" style={{ marginBottom: '8px' }}>{excelError}</p>
+                {excelError.includes('Access denied') && (
+                  <button 
+                    type="button" 
+                    className="btn btn--primary btn--sm" 
+                    onClick={async () => {
+                      setExcelError('');
+                      setExcelInspecting(true);
+                      try {
+                        await connectGmail();
+                        setTimeout(() => handleInspectExcel(), 2000);
+                      } catch (err: any) {
+                        setExcelError(`Authorization failed: ${err.message}`);
+                      } finally {
+                        setExcelInspecting(false);
+                      }
+                    }}
+                  >
+                    Authorize Google Sheets Access
+                  </button>
+                )}
+              </div>
+            )}
 
             {sheetsList.length > 0 && (
               <div className="excel-setup-box" style={{ marginTop: '16px', padding: 0, border: 'none' }}>
