@@ -1,4 +1,4 @@
-import { getSettings, logToDb } from '../database';
+import { getSettings, saveSetting, logToDb } from '../database';
 import type { RepoScrapeResult } from './gitService';
 
 export interface GeneratedReportResult {
@@ -81,25 +81,71 @@ You MUST respond ONLY with a raw JSON object containing these keys:
 
   const prompt = `Date: ${dateStr}\n\nHere is the Git commit history and diffs for today:\n\n${gitHistoryText}`;
 
-  logToDb('INFO', 'LLM', `Sending query to LLM provider: ${provider} (Model: ${model})`);
+  // 1. Log the configured source model name from settings
+  console.log(`LLM REQUEST: Stored model configuration in database: "${settings.llmModel || 'none (using default)'}"`);
+  logToDb('INFO', 'LLM', `LLM REQUEST: Stored model configuration in database: "${settings.llmModel || 'none (using default)'}"`);
 
   if (provider === 'gemini') {
+    // 2. Fetch available models from Gemini API to verify list
+    let availableModels: any[] = [];
     try {
       const listUrl = `https://generativelanguage.googleapis.com/v1beta/models?key=${apiKey}`;
       const listRes = await fetch(listUrl);
       if (listRes.ok) {
         const listData = await listRes.json();
-        const names = listData.models?.map((m: any) => m.name) || [];
+        availableModels = listData.models || [];
+        const names = availableModels.map((m: any) => m.name) || [];
         console.log("DEBUG: Available Gemini Models for this API Key:", names);
         logToDb('INFO', 'LLM', `DEBUG: Available Gemini Models: ${names.join(', ')}`);
       } else {
-        console.error("DEBUG: Failed to list Gemini models. Status:", listRes.status, await listRes.text());
+        console.error("DEBUG: Failed to list Gemini models. Status:", listRes.status);
       }
     } catch (listErr: any) {
       console.error("DEBUG: Error listing Gemini models:", listErr.message);
     }
 
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
+    // 3. Clean the model identifier to strip any redundant "models/" prefix
+    let cleanModel = model.startsWith('models/') ? model.substring(7) : model;
+    const fullModelName = `models/${cleanModel}`;
+
+    const supportsGenerateContent = (m: any) => 
+      m.supportedGenerationMethods?.includes('generateContent') || 
+      m.supportedGenerationMethods?.includes('generateMessage');
+
+    // 4. Verify model validity and auto-switch if needed
+    const exactMatch = availableModels.find(m => m.name === fullModelName && supportsGenerateContent(m));
+
+    if (availableModels.length > 0 && !exactMatch) {
+      console.warn(`Resolved model "${model}" is either invalid or unsupported for generateContent.`);
+      logToDb('WARN', 'LLM', `Resolved model "${model}" is invalid or unsupported. Automatically resolving best compatible model.`);
+
+      // Find best fallback model
+      let fallbackModelObj = availableModels.find(m => m.name?.includes('gemini-1.5-flash') && supportsGenerateContent(m));
+      
+      if (!fallbackModelObj) {
+        fallbackModelObj = availableModels.find(m => m.name?.toLowerCase().includes('flash') && supportsGenerateContent(m));
+      }
+      if (!fallbackModelObj) {
+        fallbackModelObj = availableModels.find(m => m.name?.toLowerCase().includes('gemini') && supportsGenerateContent(m));
+      }
+      if (!fallbackModelObj) {
+        fallbackModelObj = availableModels.find(m => supportsGenerateContent(m));
+      }
+
+      if (fallbackModelObj) {
+        const rawFallbackName = fallbackModelObj.name || '';
+        cleanModel = rawFallbackName.startsWith('models/') ? rawFallbackName.substring(7) : rawFallbackName;
+        console.log(`Auto-switching to compatible model: ${cleanModel}`);
+        logToDb('INFO', 'LLM', `Auto-switching model configuration to: ${cleanModel}`);
+        saveSetting('llmModel', cleanModel);
+      }
+    }
+
+    // 5. Log resolved model name immediately before generateContent
+    console.log(`LLM REQUEST: Resolved model identifier for query: "${cleanModel}"`);
+    logToDb('INFO', 'LLM', `LLM REQUEST: Resolved model identifier for query: "${cleanModel}"`);
+
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/${cleanModel}:generateContent?key=${apiKey}`;
     const response = await fetch(url, {
       method: 'POST',
       headers: {
