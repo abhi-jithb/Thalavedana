@@ -18,6 +18,8 @@ function runGit(args: string[], cwd: string): Promise<string> {
 export interface GitCommitInfo {
   hash: string;
   author: string;
+  authorEmail: string;
+  parents: string[];
   date: string;
   message: string;
   changedFiles: Array<{ status: string; file: string }>;
@@ -30,6 +32,16 @@ export interface RepoScrapeResult {
   repoName: string;
   branchName: string;
   commits: GitCommitInfo[];
+}
+
+export interface FilterStats {
+  repoName: string;
+  totalScanned: number;
+  byCurrentUser: number;
+  mergeCommitsIgnored: number;
+  remoteCommitsIgnored: number;
+  syncCommitsIgnored: number;
+  finalSent: number;
 }
 
 export async function verifyGitRepo(repoPath: string): Promise<{ ok: boolean; name: string; error?: string }> {
@@ -52,6 +64,126 @@ export async function verifyGitRepo(repoPath: string): Promise<{ ok: boolean; na
   }
 }
 
+export async function getRepoStatusDetail(repoPath: string): Promise<{
+  activeBranch: string;
+  lastCommitTime: string;
+  status: 'active' | 'missing' | 'error';
+  error?: string;
+}> {
+  const resolvedPath = path.resolve(repoPath);
+  if (!fs.existsSync(resolvedPath)) {
+    return { activeBranch: 'N/A', lastCommitTime: 'N/A', status: 'missing', error: 'Directory does not exist' };
+  }
+  try {
+    // Current Active Branch
+    let activeBranch = 'unknown';
+    try {
+      activeBranch = await runGit(['branch', '--show-current'], resolvedPath);
+      if (!activeBranch) {
+        activeBranch = await runGit(['rev-parse', '--abbrev-ref', 'HEAD'], resolvedPath);
+      }
+    } catch (e) {
+      activeBranch = 'detached-head';
+    }
+
+    // Last commit time
+    let lastCommitTime = 'N/A';
+    try {
+      lastCommitTime = await runGit(['log', '-1', '--format=%cd', '--date=format:%Y-%m-%d %H:%M:%S'], resolvedPath);
+    } catch (e) {
+      lastCommitTime = 'No commits';
+    }
+
+    return {
+      activeBranch: activeBranch.trim(),
+      lastCommitTime: lastCommitTime.trim(),
+      status: 'active'
+    };
+  } catch (err: any) {
+    return { activeBranch: 'N/A', lastCommitTime: 'N/A', status: 'error', error: err.message };
+  }
+}
+
+export async function getGitGlobalConfig(repoPath: string): Promise<{ name: string; email: string }> {
+  try {
+    const name = await runGit(['config', 'user.name'], repoPath);
+    const email = await runGit(['config', 'user.email'], repoPath);
+    return { name: name.trim(), email: email.trim() };
+  } catch (e) {
+    return { name: '', email: '' };
+  }
+}
+
+export function filterCommitsForUser(
+  commits: GitCommitInfo[],
+  developerName: string,
+  developerEmail: string
+): { filtered: GitCommitInfo[]; stats: Omit<FilterStats, 'repoName'> } {
+  let byCurrentUser = 0;
+  let mergeCommitsIgnored = 0;
+  let remoteCommitsIgnored = 0;
+  let syncCommitsIgnored = 0;
+
+  const filtered: GitCommitInfo[] = [];
+  const devNameLower = developerName.trim().toLowerCase();
+  const devEmailLower = developerEmail.trim().toLowerCase();
+
+  const syncPatterns = [
+    /merge branch/i,
+    /merge remote-tracking branch/i,
+    /merge pull request/i,
+    /merge origin/i,
+    /merge upstream/i,
+    /update submodule/i,
+    /fast-forward/i,
+    /resolved merge conflicts/i,
+    /^merge$/i
+  ];
+
+  for (const commit of commits) {
+    const authorName = commit.author.trim().toLowerCase();
+    const authorEmail = commit.authorEmail.trim().toLowerCase();
+    const msg = commit.message.trim();
+
+    // 1. Check Merge Status (multi-parent or merge pattern subject)
+    const isMergeCommit = 
+      commit.parents.length > 1 || 
+      msg.toLowerCase().startsWith('merge ') || 
+      msg.toLowerCase().includes('merge pull request');
+
+    // 2. Check Sync Commit Message Patterns
+    const isSyncCommit = syncPatterns.some(pattern => pattern.test(msg));
+
+    // 3. Check Author Match
+    const isAuthorMatch = 
+      (devNameLower && authorName === devNameLower) || 
+      (devEmailLower && authorEmail === devEmailLower);
+
+    if (isMergeCommit) {
+      mergeCommitsIgnored++;
+    } else if (isSyncCommit) {
+      syncCommitsIgnored++;
+    } else if (!isAuthorMatch) {
+      remoteCommitsIgnored++;
+    } else {
+      byCurrentUser++;
+      filtered.push(commit);
+    }
+  }
+
+  return {
+    filtered,
+    stats: {
+      totalScanned: commits.length,
+      byCurrentUser,
+      mergeCommitsIgnored,
+      remoteCommitsIgnored,
+      syncCommitsIgnored,
+      finalSent: filtered.length
+    }
+  };
+}
+
 export async function scrapeRepoForDate(repoPath: string, dateStr: string): Promise<RepoScrapeResult> {
   const resolvedPath = path.resolve(repoPath);
   const repoName = path.basename(resolvedPath);
@@ -64,11 +196,10 @@ export async function scrapeRepoForDate(repoPath: string, dateStr: string): Prom
       branchName = await runGit(['rev-parse', '--abbrev-ref', 'HEAD'], resolvedPath);
     }
   } catch (err) {
-    // Fallback if detached head
     branchName = 'detached-head';
   }
 
-  // Get commits for date
+  // Get commits for date with parents information (%P) and author email (%ae)
   const since = `${dateStr}T00:00:00`;
   const until = `${dateStr}T23:59:59`;
   
@@ -76,13 +207,13 @@ export async function scrapeRepoForDate(repoPath: string, dateStr: string): Prom
   try {
     logOutput = await runGit([
       'log',
+      '--all',
       `--since=${since}`,
       `--until=${until}`,
-      '--pretty=format:%H|%an|%ad|%s',
+      '--pretty=format:%H|%an|%ae|%ad|%P|%s',
       '--date=iso'
     ], resolvedPath);
   } catch (err: any) {
-    // If no commits or error, return empty list
     return { repoPath: resolvedPath, repoName, branchName, commits: [] };
   }
 
@@ -99,8 +230,11 @@ export async function scrapeRepoForDate(repoPath: string, dateStr: string): Prom
     if (!hash) continue;
     
     const author = parts[1] || 'Unknown';
-    const date = parts[2] || '';
-    const message = parts[3] || '';
+    const authorEmail = parts[2] || '';
+    const date = parts[3] || '';
+    const parentsStr = parts[4] || '';
+    const parents = parentsStr.trim().split(/\s+/).filter(Boolean);
+    const message = parts.slice(5).join('|') || '';
 
     // Get changed files securely
     let changedFiles: Array<{ status: string; file: string }> = [];
@@ -135,17 +269,15 @@ export async function scrapeRepoForDate(repoPath: string, dateStr: string): Prom
         '--shortstat',
         hash
       ], resolvedPath);
-      // Grab only the last line (the summary line)
       const summaryLines = summaryOutput.split('\n').filter(Boolean);
       diffSummary = summaryLines[summaryLines.length - 1] || '';
     } catch (err) {
       // Ignore diff summary error
     }
 
-    // Get patch/diff securely (truncated to prevent context blowup)
+    // Get patch/diff securely
     let patch = '';
     try {
-      // Limit to max 150 lines of diff per commit to avoid exceeding LLM context
       const patchOutput = await runGit([
         'show',
         '--unified=3',
@@ -164,6 +296,8 @@ export async function scrapeRepoForDate(repoPath: string, dateStr: string): Prom
     commits.push({
       hash,
       author,
+      authorEmail,
+      parents,
       date,
       message,
       changedFiles,

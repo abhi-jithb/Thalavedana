@@ -5,6 +5,11 @@ export interface GeneratedReportResult {
   report: string;
   emailSubject: string;
   emailBody: string;
+  remarks: string;
+  meetingDetails: string;
+  providerUsed?: string;
+  recoveryActions?: string[];
+  warnings?: string[];
 }
 
 // Clean response JSON helper in case the LLM wraps it in markdown code blocks
@@ -103,22 +108,42 @@ async function discoverGeminiModels(apiKey: string): Promise<string[]> {
   }
 }
 
+const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+
+function getGeminiErrorDetails(status: number, errorText: string): { action: 'retry' | 'switch_key' | 'self_heal'; message: string } {
+  const lower = errorText.toLowerCase();
+  if (status === 404 || 
+      lower.includes('not_found') || 
+      lower.includes('model not found') || 
+      lower.includes('deprecated') || 
+      lower.includes('not supported') || 
+      lower.includes('removed') || 
+      lower.includes('not available')) {
+    return { action: 'self_heal', message: 'Model unavailable or deprecated' };
+  }
+  if (status === 400 || status === 403 ||
+      lower.includes('api_key_invalid') ||
+      lower.includes('permission_denied') ||
+      lower.includes('key revoked') ||
+      lower.includes('quota') ||
+      lower.includes('limit exceeded') ||
+      lower.includes('authentication') ||
+      lower.includes('invalid_grant')) {
+    return { action: 'switch_key', message: 'API key authorization or quota failure' };
+  }
+  if (status === 429 || status === 500 || status === 502 || status === 503) {
+    return { action: 'retry', message: `Server error status ${status}` };
+  }
+  return { action: 'switch_key', message: `Unhandled API response ${status}: ${errorText}` };
+}
+
 export async function generateReportFromLLM(
   dateStr: string,
   scrapeResults: RepoScrapeResult[]
 ): Promise<GeneratedReportResult> {
   const settings = getSettings();
-  const provider = settings.llmProvider || 'gemini';
-  const apiKey = settings.geminiApiKey || '';
-  const modelConfig = settings.llmModel || '';
-  const endpoint = settings.llmEndpoint || '';
-
-  if (!apiKey && provider === 'gemini') {
-    throw new Error('Gemini API key is not configured');
-  } else if (!apiKey && provider === 'openai-compatible') {
-    throw new Error('API key is not configured for OpenAI-compatible provider');
-  }
-
+  const providerConfig = settings.llmProvider || 'gemini';
+  
   // Format scraped commits into text
   let gitHistoryText = '';
   for (const repo of scrapeResults) {
@@ -139,204 +164,273 @@ export async function generateReportFromLLM(
     }
   }
 
-  if (!gitHistoryText) {
-    throw new Error('No commit history data to send to LLM');
+  const manualNotes = settings.todayWorkNotes || '';
+  if (!gitHistoryText && !manualNotes.trim()) {
+    throw new Error('No commit history data or manual work notes to send to LLM');
   }
 
+  const dateObj = new Date(dateStr + 'T00:00:00');
+  const formattedDate = dateObj.toLocaleDateString('en-US', {
+    month: 'long',
+    day: 'numeric',
+    year: 'numeric'
+  });
+
+  const signature = settings.emailSignature || `Regards,\n\nAbhijith B\nDeveloper Intern\nKerala Development and Innovation Strategic Council (KDISC)`;
+  const signatureHtml = signature.replace(/\n/g, '<br>');
+
+  const workStart = settings.workStartTime || '10:00 AM';
+  const workEnd = settings.workEndTime || '05:30 PM';
+
   const systemInstructions = `You are a professional internship work reporting assistant. 
-Your task is to summarize the provided Git commit logs and diff patches into a professional daily work report and a professional email.
+Your task is to summarize the provided daily work data (Git commits and/or manual notes) into a professional daily work report, a professional email, a concise one-line remark, and meeting details.
+
+You are generating a personal daily work report.
+There are TWO possible data sources provided in the user prompt:
+- Source 1: Verified Git commits.
+- Source 2: Manual work notes entered by the user.
 
 Strict Rules:
-1. Be professional, concise, and factual.
-2. NO exaggeration and NO invented work. Do not assume or add details that are not present in the git commit messages or diffs.
-3. Only summarize the supplied git information.
-4. If there is insufficient information, clearly indicate uncertainty rather than inventing details.
-5. The email should be a professional, neat HTML format, suitable to send to supervisors/managers.
-6. The report should be a clear, professional Markdown format.
+1. Describe ONLY work completed by the developer whose commits or manual notes are provided.
+2. Never fabricate work or invent accomplishments.
+3. Never claim teammate commits or pulled changes as user implementation.
+4. If the user mentions pulling teammate changes or code (e.g. "pulled latest dashboard"), summarize it only as testing, review, or validation work locally—NEVER as personal implementation.
+5. If the manual notes contain words like "Tested", "Validated", "Verified", "Reviewed", "Debugged", "Investigated", "Researched", "Refactored", "Optimized", generate professional descriptions of those testing/review activities (e.g., "Validated the newly integrated district-wise WhatsApp functionality in the local development environment and confirmed expected behavior").
+6. If the manual notes mention meetings (e.g., "Discussed deployment strategy with mentor", "Requirement clarification meeting"), summarize them professionally inside the "meetingDetails" field. If no meetings are mentioned in either source, set "meetingDetails" to an empty string. Do NOT invent meetings.
+7. If the provided data only contains synchronization or merge activity and no manual notes, state that no personal development work was detected.
+8. Be professional, concise, and factual.
+9. The email MUST be a professional, neat HTML format, suitable to send to supervisors/managers.
+10. The emailSubject MUST be exactly "Daily Development Report - ${formattedDate}".
+11. The emailBody HTML MUST conclude with this exact signature:
+<p>${signatureHtml}</p>
+12. The report MUST be a clear, professional Markdown format. The report title/header MUST be "Daily Development Report".
+13. Do NOT estimate, mention, or use Git commit timestamps to state working hours. The official work hours for this report are ${workStart} to ${workEnd}.
+14. Generate a concise one-line remark based on the day's work.
 
 You MUST respond ONLY with a raw JSON object containing these keys:
 {
   "report": "Markdown string of the daily report",
   "emailSubject": "String for email subject line",
-  "emailBody": "HTML formatted email body string"
+  "emailBody": "HTML formatted email body string",
+  "remarks": "String for a concise one-line remark based on the day's work",
+  "meetingDetails": "String for summary of meetings or discussions, or empty string"
 }`;
 
-  const prompt = `Date: ${dateStr}\n\nHere is the Git commit history and diffs for today:\n\n${gitHistoryText}`;
+  let prompt = `Date: ${dateStr}\nOfficial Work Hours: ${workStart} - ${workEnd}\n\n`;
+  if (gitHistoryText) {
+    prompt += `Source 1: Verified Git commits:\n${gitHistoryText}\n\n`;
+  } else {
+    prompt += `Source 1: Verified Git commits:\nNo Git commits detected for today.\n\n`;
+  }
+  if (manualNotes.trim()) {
+    prompt += `Source 2: Manual work notes entered by the user:\n${manualNotes.trim()}\n\n`;
+  } else {
+    prompt += `Source 2: Manual work notes entered by the user:\nNo manual notes entered.\n\n`;
+  }
 
-  if (provider === 'gemini') {
-    // 1. Discover available models dynamically
-    let availableModels = await discoverGeminiModels(apiKey);
-    
-    // 2. Select initial model
-    let initialModel = modelConfig.startsWith('models/') ? modelConfig.substring(7) : modelConfig;
-    
-    if (!initialModel || !availableModels.includes(initialModel)) {
-      if (availableModels.length > 0) {
-        const oldModel = initialModel || 'none';
-        const fallback = availableModels[0] || '';
-        
-        console.log("Configured model:", oldModel);
-        console.log("Selected fallback:", fallback);
-        console.log("Old model:", oldModel);
-        console.log("New model:", fallback);
-        console.log("Reason: Configured model not found in available models list.");
-        
-        logToDb('WARN', 'LLM', `Configured model "${oldModel}" is invalid. Selected fallback: ${fallback}. Reason: Not found in available models.`);
-        
-        initialModel = fallback;
-        saveSetting('llmModel', fallback);
-      } else {
-        throw new Error('No compatible Google Gemini models discovered. Please check your API key and network connection.');
-      }
-    }
+  const recoveryActions: string[] = [];
+  const warnings: string[] = [];
+  let retriesCount = 0;
 
-    let activeModel = initialModel;
-    console.log("Configured model:", modelConfig || 'none');
-    console.log("Resolved model:", initialModel);
-    console.log("Actual model sent:", activeModel);
-    console.log("Available models:", availableModels.join(', '));
+  // Gather Gemini keys
+  const geminiKeys: string[] = [];
+  if (settings.geminiApiKey1) geminiKeys.push(settings.geminiApiKey1);
+  else if (settings.geminiApiKey) geminiKeys.push(settings.geminiApiKey); // legacy key fallback
+  if (settings.geminiApiKey2) geminiKeys.push(settings.geminiApiKey2);
+  if (settings.geminiApiKey3) geminiKeys.push(settings.geminiApiKey3);
 
-    const makeRequest = async (targetModel: string) => {
-      const url = `https://generativelanguage.googleapis.com/v1beta/models/${targetModel}:generateContent?key=${apiKey}`;
-      return await fetch(url, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          contents: [
-            {
-              parts: [
-                {
-                  text: `${systemInstructions}\n\n${prompt}`,
-                },
-              ],
-            },
-          ],
-          generationConfig: {
-            responseMimeType: 'application/json',
-            responseSchema: {
-              type: 'OBJECT',
-              properties: {
-                report: { type: 'STRING' },
-                emailSubject: { type: 'STRING' },
-                emailBody: { type: 'STRING' },
-              },
-              required: ['report', 'emailSubject', 'emailBody'],
-            },
-          },
-        }),
-      });
-    };
+  const geminiEnabled = settings.geminiEnabled !== 'false';
+  const groqEnabled = settings.groqEnabled !== 'false';
+  const groqApiKey = settings.groqApiKey || '';
+  const groqModel = settings.groqModel || 'llama-3.3-70b-versatile';
 
-    let response = await makeRequest(activeModel);
-    let isErrorResponse = false;
-    let errorText = '';
+  // 1. Try Gemini Provider if enabled and keys exist
+  if (geminiEnabled && geminiKeys.length > 0) {
+    for (let keyIdx = 0; keyIdx < geminiKeys.length; keyIdx++) {
+      const currentKey = geminiKeys[keyIdx]!;
+      const keyLabel = `Gemini (Key ${keyIdx + 1})`;
+      logToDb('INFO', 'LLM', `Trying Gemini API key ${keyIdx + 1} of ${geminiKeys.length}`);
 
-    if (!response.ok) {
-      isErrorResponse = true;
-      errorText = await response.text();
-    }
+      let modelConfig = settings.llmModel || 'gemini-2.5-flash';
+      let activeModel = modelConfig.startsWith('models/') ? modelConfig.substring(7) : modelConfig;
 
-    // 3. Self-healing / Retry if model not found or deprecated
-    const shouldRetry = isErrorResponse && (
-      response.status === 404 ||
-      errorText.includes('NOT_FOUND') ||
-      errorText.includes('Model not found') ||
-      errorText.toLowerCase().includes('deprecated') ||
-      errorText.toLowerCase().includes('not supported')
-    );
-
-    if (shouldRetry) {
-      console.warn(`Gemini API call failed with model "${activeModel}". Status: ${response.status}. Initiating self-healing...`);
-      logToDb('WARN', 'LLM', `Gemini request failed for model: ${activeModel}. Error: ${errorText}. Self-healing triggered.`);
-
-      // Refresh list of models
-      availableModels = await discoverGeminiModels(apiKey);
-      
-      // Filter out the failed model
-      const remainingModels = availableModels.filter(m => m !== activeModel);
-      
-      if (remainingModels.length > 0) {
-        const replacement = remainingModels[0] || '';
-        
-        console.log("Old model:", activeModel);
-        console.log("New model:", replacement);
-        console.log("Reason:", `API returned error status ${response.status} (${errorText})`);
-        console.log("Selected fallback:", replacement);
-        
-        logToDb('INFO', 'LLM', `Self-healed. Old model: ${activeModel}, New model: ${replacement}. Reason: API error.`);
-        
+      // Ensure model exists
+      let availableModels = await discoverGeminiModels(currentKey);
+      if (availableModels.length > 0 && !availableModels.includes(activeModel)) {
+        const replacement = availableModels[0]!;
+        warnings.push(`Model ${activeModel} not found for key ${keyIdx + 1}. Auto-selected compatible model ${replacement}`);
         activeModel = replacement;
         saveSetting('llmModel', replacement);
-        
-        // Retry the request once
-        console.log("Actual model sent (retry):", activeModel);
-        response = await makeRequest(activeModel);
-        
-        if (!response.ok) {
-          errorText = await response.text();
-          logToDb('ERROR', 'LLM', `Retry also failed. Gemini API error: ${errorText}`);
-          throw new Error(`Gemini API returned error code ${response.status}: ${errorText}`);
+      }
+
+      let attempt = 0;
+      let keyFailed = false;
+
+      while (attempt <= 2 && !keyFailed) {
+        if (attempt > 0) {
+          const waitMs = attempt === 1 ? 2000 : 5000;
+          retriesCount++;
+          recoveryActions.push(`${keyLabel} retry ${attempt} (waiting ${waitMs / 1000}s)`);
+          logToDb('WARN', 'LLM', `Retrying ${keyLabel} in ${waitMs / 1000}s due to temporary network/rate-limit error...`);
+          await sleep(waitMs);
         }
-      } else {
-        throw new Error(`Gemini API call failed with ${response.status}: ${errorText}. No alternative fallback models available.`);
-      }
-    } else if (isErrorResponse) {
-      logToDb('ERROR', 'LLM', `Gemini API error: ${errorText}`);
-      throw new Error(`Gemini API returned error code ${response.status}: ${errorText}`);
-    }
 
-    const data = await response.json();
-    try {
-      const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
-      if (!text) {
-        throw new Error('Empty response from Gemini');
-      }
-      const parsed = cleanJsonResponse(text);
-      logToDb('INFO', 'LLM', 'Successfully generated report and email using Gemini');
-      return parsed;
-    } catch (err: any) {
-      logToDb('ERROR', 'LLM', `Failed to parse Gemini output: ${err.message}`);
-      throw new Error(`Failed to parse LLM output: ${err.message}. Raw output: ${JSON.stringify(data)}`);
-    }
-  } else {
-    // OpenAI-compatible provider
-    const targetUrl = endpoint || 'https://api.openai.com/v1/chat/completions';
-    const response = await fetch(targetUrl, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${apiKey}`,
-      },
-      body: JSON.stringify({
-        model: modelConfig || 'gpt-4o-mini',
-        messages: [
-          { role: 'system', content: systemInstructions },
-          { role: 'user', content: prompt },
-        ],
-        response_format: { type: 'json_object' },
-      }),
-    });
+        try {
+          const controller = new AbortController();
+          const timeoutId = setTimeout(() => controller.abort(), 20000); // 20s timeout
 
-    if (!response.ok) {
-      const errorText = await response.text();
-      logToDb('ERROR', 'LLM', `${provider} API error: ${errorText}`);
-      throw new Error(`${provider} API returned error code ${response.status}: ${errorText}`);
-    }
+          const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${activeModel}:generateContent?key=${currentKey}`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            signal: controller.signal,
+            body: JSON.stringify({
+              contents: [{ parts: [{ text: `${systemInstructions}\n\n${prompt}` }] }],
+              generationConfig: {
+                responseMimeType: 'application/json',
+                responseSchema: {
+                  type: 'OBJECT',
+                  properties: {
+                    report: { type: 'STRING' },
+                    emailSubject: { type: 'STRING' },
+                    emailBody: { type: 'STRING' },
+                    remarks: { type: 'STRING' },
+                    meetingDetails: { type: 'STRING' },
+                  },
+                  required: ['report', 'emailSubject', 'emailBody', 'remarks', 'meetingDetails'],
+                },
+              },
+            }),
+          });
+          clearTimeout(timeoutId);
 
-    const data = await response.json();
-    try {
-      const text = data.choices?.[0]?.message?.content;
-      if (!text) {
-        throw new Error(`Empty response from ${provider}`);
+          if (response.ok) {
+            const data = await response.json();
+            const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
+            if (!text) {
+              throw new Error('Empty response from Gemini');
+            }
+            const parsed = cleanJsonResponse(text);
+            logToDb('INFO', 'LLM', `Successfully generated report using ${keyLabel}`);
+            
+            return {
+              ...parsed,
+              providerUsed: keyLabel,
+              recoveryActions,
+              warnings
+            };
+          }
+
+          // Error status returned
+          const status = response.status;
+          const errorText = await response.text();
+          const classification = getGeminiErrorDetails(status, errorText);
+
+          if (classification.action === 'self_heal') {
+            recoveryActions.push(`${keyLabel} self-healed: ${activeModel} -> ${classification.message}`);
+            logToDb('WARN', 'LLM', `Model error detected for ${activeModel}. Triggering self-healing...`);
+            
+            availableModels = await discoverGeminiModels(currentKey);
+            const remaining = availableModels.filter(m => m !== activeModel);
+            if (remaining.length > 0) {
+              activeModel = remaining[0]!;
+              saveSetting('llmModel', activeModel);
+              attempt = 0; // restart attempts with new model
+              continue;
+            } else {
+              keyFailed = true;
+              recoveryActions.push(`${keyLabel} switch key: No fallback model discovered`);
+              logToDb('ERROR', 'LLM', `Self-heal failed: No compatible alternative model for ${keyLabel}`);
+            }
+          } else if (classification.action === 'switch_key') {
+            keyFailed = true;
+            recoveryActions.push(`${keyLabel} switch key: ${classification.message} (Status ${status})`);
+            logToDb('ERROR', 'LLM', `${keyLabel} failed permanently: ${classification.message}. Switching to next key...`);
+          } else {
+            // retryable
+            attempt++;
+          }
+
+        } catch (fetchErr: any) {
+          logToDb('WARN', 'LLM', `${keyLabel} fetch error: ${fetchErr.message || fetchErr}`);
+          // Timeout / network error is retryable
+          attempt++;
+        }
       }
-      const parsed = cleanJsonResponse(text);
-      logToDb('INFO', 'LLM', `Successfully generated report using ${provider}`);
-      return parsed;
-    } catch (err: any) {
-      logToDb('ERROR', 'LLM', `Failed to parse ${provider} output: ${err.message}`);
-      throw new Error(`Failed to parse LLM output: ${err.message}`);
     }
   }
+
+  // 2. Try Groq Provider if enabled/fallback is needed and Groq API key is present
+  if (groqEnabled && groqApiKey) {
+    const keyLabel = 'Groq';
+    logToDb('INFO', 'LLM', `Falling back to Groq provider using model ${groqModel}`);
+    recoveryActions.push('Fell back to Groq');
+
+    let attempt = 0;
+    while (attempt <= 2) {
+      if (attempt > 0) {
+        const waitMs = attempt === 1 ? 2000 : 5000;
+        retriesCount++;
+        recoveryActions.push(`Groq retry ${attempt} (waiting ${waitMs / 1000}s)`);
+        logToDb('WARN', 'LLM', `Retrying Groq in ${waitMs / 1000}s...`);
+        await sleep(waitMs);
+      }
+
+      try {
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 20000); // 20s timeout
+
+        const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${groqApiKey}`,
+          },
+          signal: controller.signal,
+          body: JSON.stringify({
+            model: groqModel,
+            messages: [
+              { role: 'system', content: systemInstructions },
+              { role: 'user', content: prompt },
+            ],
+            response_format: { type: 'json_object' },
+          }),
+        });
+        clearTimeout(timeoutId);
+
+        if (response.ok) {
+          const data = await response.json();
+          const text = data.choices?.[0]?.message?.content;
+          if (!text) {
+            throw new Error('Empty response from Groq');
+          }
+          const parsed = cleanJsonResponse(text);
+          logToDb('INFO', 'LLM', 'Successfully generated report using Groq');
+          return {
+            ...parsed,
+            providerUsed: keyLabel,
+            recoveryActions,
+            warnings
+          };
+        }
+
+        const status = response.status;
+        const errorText = await response.text();
+        logToDb('ERROR', 'LLM', `Groq API error status ${status}: ${errorText}`);
+
+        // Only retry on 429, 500, 502, 503
+        if (status === 429 || status === 500 || status === 502 || status === 503) {
+          attempt++;
+        } else {
+          throw new Error(`Groq returned permanent error status ${status}`);
+        }
+
+      } catch (err: any) {
+        logToDb('WARN', 'LLM', `Groq exception: ${err.message || err}`);
+        attempt++;
+      }
+    }
+  }
+
+  // 3. Complete failure
+  throw new Error('All configured LLM providers and fallbacks failed to generate the report.');
 }

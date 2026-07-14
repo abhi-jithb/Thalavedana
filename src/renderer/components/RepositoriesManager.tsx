@@ -41,13 +41,14 @@ export default function RepositoriesManager({ repos, addRepo, removeRepo }: Repo
         <h3>Add New Repository</h3>
         <p className="description" style={{ marginBottom: '16px' }}>Provide the absolute local folder path to your active work directory.</p>
         
-        <form onSubmit={handleAddRepo} className="form-group row">
+        <form onSubmit={handleAddRepo} className="form-group row" style={{ display: 'flex', gap: '8px' }}>
           <input 
             type="text" 
             placeholder="e.g. /home/username/Projects/my-project"
             value={repoPathInput}
             onChange={(e) => setRepoPathInput(e.target.value)}
             disabled={repoLoading}
+            style={{ flexGrow: 1 }}
           />
           <button type="submit" className="btn btn--primary" disabled={repoLoading}>
             {repoLoading ? 'Verifying...' : 'Add Repository'}
@@ -61,19 +62,33 @@ export default function RepositoriesManager({ repos, addRepo, removeRepo }: Repo
         
         {repos.length === 0 ? (
           <div style={{ textAlign: 'center', padding: '40px 0' }}>
-            {/* Cute empty folder doodle */}
             <svg width="80" height="80" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1" strokeLinecap="round" strokeLinejoin="round" style={{ color: '#D4D4D4', marginBottom: '12px' }}>
               <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" />
             </svg>
             <p className="dimmed">No repositories configured yet.</p>
           </div>
         ) : (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginTop: '12px' }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', marginTop: '12px' }}>
             {repos.map((repo) => (
-              <div key={repo.id} className="repo-item" style={{ margin: 0 }}>
+              <div key={repo.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'var(--accent-light)', padding: '12px 16px', borderRadius: '8px', border: '1px solid var(--border-light)' }}>
                 <div>
-                  <strong>{repo.name}</strong>
-                  <span className="repo-item__path">{repo.path}</span>
+                  <div style={{ fontWeight: '700', fontSize: '13px' }}>
+                    {repo.name}
+                    {repo.activeBranch && (
+                      <span style={{ fontSize: '10px', color: 'var(--text-muted)', background: 'var(--bg-app)', padding: '2px 6px', borderRadius: '10px', marginLeft: '8px', fontWeight: '500' }}>
+                        Branch: {repo.activeBranch}
+                      </span>
+                    )}
+                  </div>
+                  <span style={{ fontSize: '11px', color: 'var(--text-muted)', display: 'block', wordBreak: 'break-all', marginTop: '2px' }}>
+                    {repo.path}
+                  </span>
+                  {repo.lastCommitTime && (
+                    <div style={{ fontSize: '10px', color: 'var(--text-muted)', marginTop: '4px' }}>
+                      Last Commit: {repo.lastCommitTime} • Last Scan: {repo.lastScanTime || 'Never'}
+                    </div>
+                  )}
+                  {repo.error && <p className="error-text" style={{ fontSize: '10px', marginTop: '4px' }}>Error: {repo.error}</p>}
                 </div>
                 <button 
                   className="btn btn--danger btn--sm" 

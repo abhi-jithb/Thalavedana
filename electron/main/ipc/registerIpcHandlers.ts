@@ -10,7 +10,7 @@ import {
   clearLogs, 
   logToDb
 } from '../database';
-import { verifyGitRepo } from '../services/gitService';
+import { verifyGitRepo, getRepoStatusDetail } from '../services/gitService';
 import { runReportForDate, retryPendingReports } from '../services/schedulerService';
 import { startGmailAuthFlow } from '../services/gmailService';
 import { getExcelMeta } from '../services/excelService';
@@ -34,8 +34,23 @@ export function registerIpcHandlers() {
   });
 
   // Repositories handlers
-  ipcMain.handle('repositories:list', () => {
-    return getRepositories();
+  ipcMain.handle('repositories:list', async () => {
+    const repos = getRepositories();
+    const settings = getSettings();
+    const enriched = [];
+    for (const repo of repos) {
+      const detail = await getRepoStatusDetail(repo.path);
+      const lastScan = settings[`lastScanTime_${repo.id}`] || 'Never';
+      enriched.push({
+        ...repo,
+        activeBranch: detail.activeBranch,
+        lastCommitTime: detail.lastCommitTime,
+        status: detail.status,
+        lastScanTime: lastScan !== 'Never' ? new Date(lastScan).toLocaleString() : 'Never',
+        error: detail.error
+      });
+    }
+    return enriched;
   });
 
   ipcMain.handle('repositories:add', async (_, repoPath) => {
@@ -78,6 +93,50 @@ export function registerIpcHandlers() {
     await retryPendingReports();
   });
 
+  ipcMain.handle('reports:retry-stage', async (_, dateStr, stage) => {
+    try {
+      return await DailyReportOrchestrator.retryStage(dateStr, stage);
+    } catch (err: any) {
+      return { ok: false, error: err.message };
+    }
+  });
+
+  ipcMain.handle('reports:approve', async (_, dateStr, editedReport, editedEmailSubject, editedEmailBody) => {
+    try {
+      return await DailyReportOrchestrator.approveAndSend(dateStr, editedReport, editedEmailSubject, editedEmailBody);
+    } catch (err: any) {
+      return false;
+    }
+  });
+
+  ipcMain.handle('reports:cancel', async (_, dateStr) => {
+    try {
+      await DailyReportOrchestrator.cancelReport(dateStr);
+    } catch (err: any) {
+      // ignore
+    }
+  });
+
+  ipcMain.handle('reports:export-markdown', async (_, dateStr, content) => {
+    try {
+      const { dialog } = require('electron');
+      const fs = require('fs');
+      const result = await dialog.showSaveDialog({
+        title: 'Export Report',
+        defaultPath: `Daily_Development_Report_${dateStr}.md`,
+        filters: [{ name: 'Markdown Files', extensions: ['md'] }, { name: 'Text Files', extensions: ['txt'] }]
+      });
+
+      if (!result.canceled && result.filePath) {
+        fs.writeFileSync(result.filePath, content, 'utf8');
+        return { ok: true, filePath: result.filePath };
+      }
+      return { ok: false };
+    } catch (err: any) {
+      return { ok: false, error: err.message };
+    }
+  });
+
   ipcMain.handle('orchestrator:get-status', (_, dateStr) => {
     return DailyReportOrchestrator.getStatus(dateStr);
   });
@@ -110,5 +169,24 @@ export function registerIpcHandlers() {
       logToDb('ERROR', 'EXCEL', `Excel inspection failed: ${err.message}`);
       throw err;
     }
+  });
+
+  // Shell handlers
+  ipcMain.handle('shell:open-external', async (_, url) => {
+    const { shell } = require('electron');
+    await shell.openExternal(url);
+  });
+
+  ipcMain.handle('shell:open-path', async (_, filePath) => {
+    const { shell, app } = require('electron');
+    let targetPath = filePath;
+    if (filePath === 'logs') {
+      targetPath = app.getPath('userData');
+    }
+    const err = await shell.openPath(targetPath);
+    if (err) {
+      return { ok: false, error: err };
+    }
+    return { ok: true };
   });
 }

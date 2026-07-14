@@ -23,7 +23,21 @@ const api: ThalavedanaApi = {
     return () => {
       ipcRenderer.removeListener('orchestrator:status-change', listener);
     };
-  }
+  },
+  onSettingsChange: (callback) => {
+    const listener = (_event: any, settings: any) => callback(settings);
+    ipcRenderer.on('settings:updated', listener);
+    return () => {
+      ipcRenderer.removeListener('settings:updated', listener);
+    };
+  },
+  retryReportStage: (dateStr, stage) => ipcRenderer.invoke('reports:retry-stage', dateStr, stage),
+  approveReport: (dateStr, reportContent, emailSubject, emailBody) => 
+    ipcRenderer.invoke('reports:approve', dateStr, reportContent, emailSubject, emailBody),
+  cancelReport: (dateStr) => ipcRenderer.invoke('reports:cancel', dateStr),
+  exportReportMarkdown: (dateStr, content) => ipcRenderer.invoke('reports:export-markdown', dateStr, content),
+  openExternal: (url) => ipcRenderer.invoke('shell:open-external', url),
+  openPath: (pathStr) => ipcRenderer.invoke('shell:open-path', pathStr),
 };
 
 contextBridge.exposeInMainWorld('thalavedana', api);

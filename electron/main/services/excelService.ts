@@ -4,7 +4,7 @@ import { getAuthenticatedClient } from './gmailService';
 
 export interface ColumnMapping {
   col: string; // "A", "B", "C", etc.
-  type: 'date' | 'report' | 'repositories' | 'fixed' | 'empty';
+  type: 'date' | 'report' | 'repositories' | 'fixed' | 'empty' | 'work_start' | 'work_end';
   fixedValue?: string;
 }
 
@@ -40,8 +40,76 @@ function colLetterToIndex(letter: string): number {
   return column - 1;
 }
 
+function parseTime(timeStr: string): Date {
+  const cleanTime = timeStr.trim();
+  const ampmMatch = cleanTime.match(/^(\d+):(\d+)\s*(AM|PM)$/i);
+  const d = new Date();
+  
+  if (ampmMatch) {
+    let hours = parseInt(ampmMatch[1]!, 10);
+    const minutes = parseInt(ampmMatch[2]!, 10);
+    const ampm = ampmMatch[3]!.toUpperCase();
+
+    if (ampm === 'PM' && hours < 12) {
+      hours += 12;
+    } else if (ampm === 'AM' && hours === 12) {
+      hours = 0;
+    }
+    d.setHours(hours, minutes, 0, 0);
+    return d;
+  }
+  
+  const twentyFourMatch = cleanTime.match(/^(\d+):(\d+)$/);
+  if (twentyFourMatch) {
+    const hours = parseInt(twentyFourMatch[1]!, 10);
+    const minutes = parseInt(twentyFourMatch[2]!, 10);
+    d.setHours(hours, minutes, 0, 0);
+    return d;
+  }
+
+  throw new Error(`Invalid time format: ${timeStr}`);
+}
+
+function formatTimeNicely(timeStr: string): string {
+  try {
+    const d = parseTime(timeStr);
+    return d.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
+  } catch (e) {
+    return timeStr;
+  }
+}
+
+function calculateTimeInvolved(startStr: string, endStr: string, settings: any): string {
+  try {
+    const start = parseTime(startStr);
+    const end = parseTime(endStr);
+
+    let diffMs = end.getTime() - start.getTime();
+    if (diffMs < 0) {
+      diffMs += 24 * 60 * 60 * 1000;
+    }
+
+    let diffHours = diffMs / (1000 * 60 * 60);
+
+    if (settings.lunchBreakMinutes) {
+      const numberMatch = String(settings.lunchBreakMinutes).match(/\d+/);
+      const lunchMin = numberMatch ? parseFloat(numberMatch[0]!) : 0;
+      if (!isNaN(lunchMin)) {
+        diffHours -= lunchMin / 60;
+      }
+    } else if (settings.subtractLunchBreak === 'true') {
+      diffHours -= 1.0;
+    }
+
+    const hours = Math.floor(diffHours);
+    return `${hours}hr`;
+  } catch (err) {
+    return '';
+  }
+}
+
 // Helper to parse sheets-specific errors for helpful UI messages
-function parseSheetsError(err: any): string {
+function parseSheetsError(err: any, sheetName?: string): string {
   console.error("RAW GOOGLE SHEETS ERROR:", err);
   
   const status = err.status || err.code || 'unknown';
@@ -52,6 +120,9 @@ function parseSheetsError(err: any): string {
   console.log(errMsgDetailed);
   logToDb('ERROR', 'EXCEL', errMsgDetailed);
 
+  if (rawMsg.includes('Unable to parse range') || rawMsg.toLowerCase().includes('range')) {
+    return `Worksheet "${sheetName || ''}" not found in the spreadsheet.`;
+  }
   if (rawMsg.includes('Insufficient Permission') || rawMsg.toLowerCase().includes('insufficient permission') || rawMsg.toLowerCase().includes('scope')) {
     const settings = getSettings();
     const email = settings.gmailUserEmail || 'your logged-in account';
@@ -81,15 +152,18 @@ export async function appendReportToExcel({
   dateStr,
   reportContent,
   repoNames,
+  remarks,
+  meetingDetails,
 }: {
   dateStr: string;
   reportContent: string;
   repoNames: string[];
+  remarks?: string;
+  meetingDetails?: string;
 }): Promise<void> {
   const settings = getSettings();
   const spreadsheetUrlOrId = settings.excelPath; // We reuse excelPath to hold Spreadsheet URL/ID
   const sheetName = settings.excelSheetName || '';
-  const mappingRaw = settings.excelColumnMapping;
 
   if (!spreadsheetUrlOrId) {
     throw new Error('Google Spreadsheet URL or ID is not configured');
@@ -99,24 +173,6 @@ export async function appendReportToExcel({
   console.log("SHEETS API (append): Extracted Spreadsheet ID:", spreadsheetId);
   if (!spreadsheetId) {
     throw new Error('Invalid Google Spreadsheet URL or ID');
-  }
-
-  let mappings: ColumnMapping[] = [];
-  if (mappingRaw) {
-    try {
-      mappings = JSON.parse(mappingRaw);
-    } catch (err) {
-      logToDb('ERROR', 'EXCEL', 'Failed to parse Google Sheets column mappings, using defaults');
-    }
-  }
-
-  // Default mappings if none are defined
-  if (mappings.length === 0) {
-    mappings = [
-      { col: 'A', type: 'date' },
-      { col: 'B', type: 'report' },
-      { col: 'C', type: 'repositories' },
-    ];
   }
 
   logToDb('INFO', 'EXCEL', `Connecting to Google Sheets: ${spreadsheetId}`);
@@ -136,39 +192,100 @@ export async function appendReportToExcel({
     });
 
     const rows = readResponse.data.values || [];
+    
+    // Check if headers exist
+    if (rows.length === 0 || !rows[0]) {
+      throw new Error(`Worksheet "${sheetName}" is empty or has no header row.`);
+    }
+
+    const normalizedHeaders = rows[0].map((h: any) => String(h).trim().toLowerCase());
+    const columnIndexMap: Record<string, number> = {};
+    const missingHeaders: string[] = [];
+
+    const headerDefinitions = [
+      { key: 'sl_no', label: 'Sl No', match: (h: string) => ['sl no', 'sl. no', 'sl.no', 'slno', 'serial no', 'serial number'].includes(h) },
+      { key: 'date', label: 'Date', match: (h: string) => h === 'date' },
+      { key: 'report', label: 'Report', match: (h: string) => ['report', 'work report', 'work summary', 'summary'].includes(h) },
+      { key: 'login_time', label: 'Login Time', match: (h: string) => ['login time', 'login', 'login_time'].includes(h) },
+      { key: 'logoff_time', label: 'Logoff Time', match: (h: string) => ['logoff time', 'logoff', 'logoff_time', 'logout time', 'logout'].includes(h) },
+      { key: 'time_involved', label: 'Time Involved (Hours)', match: (h: string) => ['time involved (hours)', 'time involved', 'time', 'time_involved', 'time involved hours'].includes(h) },
+      { key: 'remarks', label: 'Remarks', match: (h: string) => ['remarks', 'remark'].includes(h) },
+      { key: 'meeting_details', label: 'Meeting Details', match: (h: string) => ['meeting details', 'meeting', 'meeting_details', 'meetings'].includes(h) }
+    ];
+
+    for (const def of headerDefinitions) {
+      const idx = normalizedHeaders.findIndex(h => def.match(h));
+      if (idx === -1) {
+        missingHeaders.push(def.label);
+      } else {
+        columnIndexMap[def.key] = idx;
+      }
+    }
+
+    if (missingHeaders.length > 0) {
+      throw new Error(`Required columns missing from Google Sheet: ${missingHeaders.join(', ')}`);
+    }
+
     const nextRowNumber = rows.length + 1;
+
+    const slNoIdx = columnIndexMap['sl_no'] as number;
+    const dateIdx = columnIndexMap['date'] as number;
+    const reportIdx = columnIndexMap['report'] as number;
+    const loginIdx = columnIndexMap['login_time'] as number;
+    const logoffIdx = columnIndexMap['logoff_time'] as number;
+    const timeIdx = columnIndexMap['time_involved'] as number;
+    const remarksIdx = columnIndexMap['remarks'] as number;
+    const meetingIdx = columnIndexMap['meeting_details'] as number;
+
+    // Calculate Sl No
+    let nextSlNo = 1;
+    if (rows.length > 1) {
+      for (let i = rows.length - 1; i >= 1; i--) {
+        const row = rows[i];
+        if (row) {
+          const val = row[slNoIdx];
+          if (val !== undefined && val !== null && val !== '') {
+            const parsed = parseInt(String(val).trim(), 10);
+            if (!isNaN(parsed)) {
+              nextSlNo = parsed + 1;
+              break;
+            }
+          }
+        }
+      }
+    }
+
+    // Format Date to DD-MM-YYYY
+    let formattedDate = dateStr;
+    const dateMatch = dateStr.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+    if (dateMatch) {
+      formattedDate = `${dateMatch[3]}-${dateMatch[2]}-${dateMatch[1]}`;
+    }
+
+    // Format Report cell (strip markdown/header)
+    let reportCell = reportContent;
+    reportCell = reportCell.replace(/^#*\s*Daily\s+Development\s+Report\s*/i, '');
+    reportCell = reportCell.replace(/[\#\*\_`]/g, '').trim();
+    reportCell = reportCell.replace(/\n+/g, ' ').replace(/\s+/g, ' ').trim();
 
     // 2. Build row data array
     const rowData: any[] = [];
-    for (const map of mappings) {
-      const idx = colLetterToIndex(map.col);
-      if (idx < 0) continue;
-
-      let val = '';
-      switch (map.type) {
-        case 'date':
-          val = dateStr;
-          break;
-        case 'report':
-          // Strip markdown characters
-          val = reportContent.replace(/[\#\*\_`]/g, '').trim();
-          break;
-        case 'repositories':
-          val = repoNames.join(', ');
-          break;
-        case 'fixed':
-          val = map.fixedValue || '';
-          break;
-        case 'empty':
-        default:
-          val = '';
-          break;
-      }
-      rowData[idx] = val;
-    }
+    rowData[slNoIdx] = nextSlNo;
+    rowData[dateIdx] = formattedDate;
+    rowData[reportIdx] = reportCell;
+    rowData[loginIdx] = formatTimeNicely(settings.workStartTime || '10:00 AM');
+    rowData[logoffIdx] = formatTimeNicely(settings.workEndTime || '05:30 PM');
+    rowData[timeIdx] = calculateTimeInvolved(
+      settings.workStartTime || '10:00 AM',
+      settings.workEndTime || '05:30 PM',
+      settings
+    );
+    rowData[remarksIdx] = remarks || '';
+    rowData[meetingIdx] = meetingDetails || '';
 
     // Fill gaps
-    for (let i = 0; i < rowData.length; i++) {
+    const maxIdx = Math.max(...Object.values(columnIndexMap));
+    for (let i = 0; i <= maxIdx; i++) {
       if (rowData[i] === undefined) {
         rowData[i] = '';
       }
@@ -188,7 +305,7 @@ export async function appendReportToExcel({
 
     logToDb('INFO', 'EXCEL', `Google Sheet updated successfully at row ${nextRowNumber}`);
   } catch (err: any) {
-    const msg = parseSheetsError(err);
+    const msg = parseSheetsError(err, sheetName);
     logToDb('ERROR', 'EXCEL', `Google Sheets error: ${msg}`);
     throw new Error(msg);
   }

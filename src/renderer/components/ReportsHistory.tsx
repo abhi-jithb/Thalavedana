@@ -8,7 +8,7 @@ interface ReportsHistoryProps {
 
 export default function ReportsHistory({ reports, generateForDate }: ReportsHistoryProps) {
   const [expandedReportId, setExpandedReportId] = useState<number | null>(null);
-  const [retryLoading, setRetryLoading] = useState<number | null>(null);
+  const [stageLoading, setStageLoading] = useState<string | null>(null);
 
   const getStatusPillClass = (status: string) => {
     switch (status) {
@@ -25,27 +25,41 @@ export default function ReportsHistory({ reports, generateForDate }: ReportsHist
   const parseEmailContent = (content: string) => {
     try {
       const parsed = JSON.parse(content);
-      return { subject: parsed.subject, body: parsed.body };
+      return { subject: parsed.subject || '', body: parsed.body || '' };
     } catch (e) {
-      return { subject: 'Daily Work Report', body: content };
+      return { subject: 'Daily Work Report', body: content || '' };
     }
   };
 
-  const handleRetry = async (reportId: number, dateStr: string) => {
-    setRetryLoading(reportId);
+  const handleExportMarkdown = async (dateStr: string, content: string) => {
     try {
-      await generateForDate(dateStr);
-    } catch (e) {
-      console.error(e);
+      const res = await window.thalavedana.exportReportMarkdown(dateStr, content);
+      if (res.ok && res.filePath) {
+        alert(`Successfully exported report to:\n${res.filePath}`);
+      }
+    } catch (e: any) {
+      alert(`Export failed: ${e.message}`);
+    }
+  };
+
+  const handleRetryStage = async (dateStr: string, stage: 'ai' | 'excel' | 'gmail') => {
+    const key = `${dateStr}-${stage}`;
+    setStageLoading(key);
+    try {
+      const res = await window.thalavedana.retryReportStage(dateStr, stage);
+      if (res && !res.ok) {
+        alert(`Retry failed: ${res.error || 'Unknown error'}`);
+      }
+    } catch (e: any) {
+      alert(`Retry failed: ${e.message}`);
     } finally {
-      setRetryLoading(null);
+      setStageLoading(null);
     }
   };
 
   if (reports.length === 0) {
     return (
       <div style={{ textAlign: 'center', padding: '60px 20px' }}>
-        {/* Cute empty book doodle */}
         <svg width="120" height="120" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1" strokeLinecap="round" strokeLinejoin="round" style={{ color: '#D4D4D4', marginBottom: '16px' }}>
           <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20" />
           <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z" />
@@ -88,9 +102,9 @@ export default function ReportsHistory({ reports, generateForDate }: ReportsHist
                   </span>
                 </div>
 
-                <div className="report-card__status-box">
+                <div className="report-card__status-box" style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
                   <span className={`status-pill ${getStatusPillClass(report.excel_status)}`}>
-                    Excel: {report.excel_status}
+                    Sheets: {report.excel_status}
                   </span>
                   <span className={`status-pill ${getStatusPillClass(report.email_status)}`}>
                     Gmail: {report.email_status === 'sent' ? 'Sent' : report.email_status}
@@ -101,24 +115,52 @@ export default function ReportsHistory({ reports, generateForDate }: ReportsHist
               {isExpanded && (
                 <div className="report-card__body">
                   {report.error_message && (
-                    <div className="error-banner" style={{ marginBottom: '20px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                      <span><strong>Error:</strong> {report.error_message}</span>
-                      <button 
-                        className="btn btn--secondary btn--sm" 
-                        onClick={() => handleRetry(report.id, report.report_date)}
-                        disabled={retryLoading !== null}
-                      >
-                        {retryLoading === report.id ? 'Retrying...' : 'Retry Now'}
-                      </button>
+                    <div className="error-banner" style={{ marginBottom: '20px' }}>
+                      <strong>Last Error:</strong> {report.error_message}
                     </div>
                   )}
+
+                  {/* Actions Header bar */}
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px', borderBottom: '1px solid var(--border-light)', paddingBottom: '12px' }}>
+                    <span style={{ fontSize: '12px', fontWeight: '700', color: 'var(--text-muted)' }}>Pipeline Recovery Controls:</span>
+                    <div style={{ display: 'flex', gap: '8px' }}>
+                      <button 
+                        className="btn btn--secondary btn--sm" 
+                        onClick={() => handleExportMarkdown(report.report_date, report.report_content)}
+                        disabled={!report.report_content}
+                      >
+                        Export Markdown
+                      </button>
+                      <button 
+                        className="btn btn--secondary btn--sm" 
+                        onClick={() => handleRetryStage(report.report_date, 'ai')}
+                        disabled={stageLoading === `${report.report_date}-ai`}
+                      >
+                        {stageLoading === `${report.report_date}-ai` ? 'Generating...' : 'Retry AI Generation'}
+                      </button>
+                      <button 
+                        className="btn btn--secondary btn--sm" 
+                        onClick={() => handleRetryStage(report.report_date, 'excel')}
+                        disabled={stageLoading === `${report.report_date}-excel` || report.excel_status === 'updated'}
+                      >
+                        {stageLoading === `${report.report_date}-excel` ? 'Syncing...' : 'Retry Sheets'}
+                      </button>
+                      <button 
+                        className="btn btn--secondary btn--sm" 
+                        onClick={() => handleRetryStage(report.report_date, 'gmail')}
+                        disabled={stageLoading === `${report.report_date}-gmail` || report.email_status === 'sent'}
+                      >
+                        {stageLoading === `${report.report_date}-gmail` ? 'Delivering...' : 'Retry Gmail'}
+                      </button>
+                    </div>
+                  </div>
 
                   <div className="report-sections">
                     <div className="report-section">
                       <h4>Work Summary Draft</h4>
                       <div className="markdown-body" style={{ background: '#FFFFFF', border: '1px solid var(--border-light)', padding: '16px', borderRadius: '8px' }}>
                         {report.report_content ? (
-                          <pre style={{ whiteSpace: 'pre-wrap', fontFamily: 'inherit', margin: 0 }}>{report.report_content}</pre>
+                          <pre style={{ whiteSpace: 'pre-wrap', fontFamily: 'inherit', margin: 0, fontSize: '13px', lineHeight: '1.5' }}>{report.report_content}</pre>
                         ) : (
                           <p className="dimmed">No summary generated.</p>
                         )}
@@ -140,8 +182,8 @@ export default function ReportsHistory({ reports, generateForDate }: ReportsHist
 
                     <div className="report-section">
                       <h4>Commit Metadata</h4>
-                      <div className="commits-preview-box">
-                        <pre>{JSON.stringify(JSON.parse(report.commit_data), null, 2)}</pre>
+                      <div className="commits-preview-box" style={{ background: 'var(--bg-app)', border: '1px solid var(--border-light)', padding: '12px', borderRadius: '8px', maxHeight: '180px', overflowY: 'auto' }}>
+                        <pre style={{ fontSize: '11px', margin: 0 }}>{JSON.stringify(JSON.parse(report.commit_data), null, 2)}</pre>
                       </div>
                     </div>
                   </div>

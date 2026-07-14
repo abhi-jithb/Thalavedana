@@ -5,7 +5,15 @@ export interface PingResponse {
 
 export interface SettingsData {
   geminiApiKey?: string;
-  llmProvider?: string; // 'gemini' | 'openai-compatible'
+  geminiApiKey1?: string;
+  geminiApiKey2?: string;
+  geminiApiKey3?: string;
+  groqApiKey?: string;
+  geminiEnabled?: string; // 'true' | 'false'
+  groqEnabled?: string; // 'true' | 'false'
+  geminiModel?: string;
+  groqModel?: string;
+  llmProvider?: string; // 'gemini' | 'groq' | 'openai-compatible'
   llmModel?: string;
   llmEndpoint?: string;
   emailTo?: string;
@@ -19,6 +27,18 @@ export interface SettingsData {
   gmailClientSecret?: string;
   gmailUserEmail?: string;
   setupCompleted?: string; // 'true' | 'false'
+  workStartTime?: string; // e.g. '10:00 AM'
+  workEndTime?: string; // e.g. '05:30 PM'
+  lunchBreakMinutes?: string; // e.g. '30'
+  workingDays?: string; // e.g. '1,2,3,4,5'
+  timezone?: string; // e.g. 'Asia/Kolkata'
+  launchOnStartup?: string; // 'true' | 'false'
+  minimizeToTray?: string; // 'true' | 'false'
+  autoSendWithoutPreview?: string; // 'true' | 'false'
+  emailSignature?: string;
+  developerName?: string;
+  developerEmail?: string;
+  todayWorkNotes?: string;
 }
 
 export interface RepositoryData {
@@ -26,6 +46,11 @@ export interface RepositoryData {
   path: string;
   name: string;
   created_at: string;
+  activeBranch?: string;
+  lastCommitTime?: string;
+  status?: 'active' | 'missing' | 'error';
+  lastScanTime?: string;
+  error?: string;
 }
 
 export interface ReportData {
@@ -57,11 +82,12 @@ export interface ExcelMetaResult {
 export interface StageStatus {
   status: 'idle' | 'running' | 'success' | 'failed';
   message?: string;
+  timestamp?: string;
 }
 
 export interface PipelineStatus {
   date: string;
-  overall: 'idle' | 'running' | 'success' | 'failed';
+  overall: 'idle' | 'running' | 'success' | 'failed' | 'paused';
   git: StageStatus;
   ai: StageStatus;
   excel: StageStatus;
@@ -75,6 +101,7 @@ export interface ThalavedanaApi {
   // Settings
   getSettings: () => Promise<SettingsData>;
   saveSetting: (key: keyof SettingsData, value: string) => Promise<void>;
+  onSettingsChange?: (callback: (settings: SettingsData) => void) => () => void;
   
   // Repositories
   getRepositories: () => Promise<RepositoryData[]>;
@@ -85,6 +112,10 @@ export interface ThalavedanaApi {
   getReports: (limit?: number) => Promise<ReportData[]>;
   generateReportForDate: (dateStr: string) => Promise<{ ok: boolean; error?: string }>;
   retryPendingReports: () => Promise<void>;
+  retryReportStage: (dateStr: string, stage: 'ai' | 'excel' | 'gmail') => Promise<{ ok: boolean; error?: string }>;
+  approveReport: (dateStr: string, reportContent: string, emailSubject: string, emailBody: string) => Promise<boolean>;
+  cancelReport: (dateStr: string) => Promise<void>;
+  exportReportMarkdown: (dateStr: string, content: string) => Promise<{ ok: boolean; filePath?: string }>;
   
   // Logs
   getLogs: (limit?: number) => Promise<LogData[]>;
@@ -99,4 +130,8 @@ export interface ThalavedanaApi {
   // Orchestrator progress monitoring
   getPipelineStatus: (dateStr: string) => Promise<PipelineStatus>;
   onStatusChange: (callback: (status: PipelineStatus) => void) => () => void;
+
+  // Shell actions
+  openExternal: (url: string) => Promise<void>;
+  openPath: (pathStr: string) => Promise<{ ok: boolean; error?: string }>;
 }

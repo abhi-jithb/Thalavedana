@@ -40,8 +40,8 @@ function isTimePast(scheduledTime: string, now = new Date()): boolean {
 }
 
 // Orchestrator: Run report for a specific date
-export async function runReportForDate(dateStr: string): Promise<boolean> {
-  return DailyReportOrchestrator.run(dateStr);
+export async function runReportForDate(dateStr: string, forceAutoSend = false): Promise<boolean> {
+  return DailyReportOrchestrator.run(dateStr, forceAutoSend);
 }
 
 // Retry failed/pending items
@@ -189,7 +189,7 @@ export async function startupRecovery(): Promise<void> {
     if (hasCommits) {
       logToDb('INFO', 'SCHEDULER', `Recovery: Found missed commits on ${dateStr}. Running report automation.`);
       try {
-        await runReportForDate(dateStr);
+        await runReportForDate(dateStr, true);
       } catch (err: any) {
         logToDb('ERROR', 'SCHEDULER', `Recovery report failed for ${dateStr}: ${err.message}`);
       }
@@ -227,7 +227,7 @@ export function startScheduler() {
         // Mark today as processed immediately to prevent concurrent triggers
         saveSetting('lastProcessedScheduledDate', todayStr);
         
-        await runReportForDate(todayStr);
+        await runReportForDate(todayStr, true);
       }
     } catch (err: any) {
       logToDb('ERROR', 'SCHEDULER', `Scheduler tick error: ${err.message}`);

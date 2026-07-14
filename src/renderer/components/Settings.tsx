@@ -1,25 +1,57 @@
 import React, { useState } from 'react';
-import type { SettingsData } from '../../shared/api';
+import type { SettingsData, RepositoryData } from '../../shared/api';
 
 interface SettingsProps {
   settings: SettingsData;
   saveSetting: (key: keyof SettingsData, value: string) => Promise<void>;
   connectGmail: () => Promise<{ email: string }>;
   refreshAll: () => Promise<void>;
+  repos: RepositoryData[];
+  addRepo: (path: string) => Promise<{ ok: boolean; name?: string; error?: string }>;
+  removeRepo: (id: number) => Promise<void>;
 }
 
 export default function Settings({
   settings,
   saveSetting,
   connectGmail,
+  repos,
+  addRepo,
+  removeRepo,
 }: SettingsProps) {
-  const [activeTab, setActiveTab] = useState<'llm' | 'gmail' | 'excel' | 'scheduler'>('llm');
+  // Tabs configuration
+  const [activeTab, setActiveTab] = useState<'general' | 'repositories' | 'ai' | 'google' | 'scheduler' | 'advanced'>('general');
 
-  // LLM local state
+  // General local state
+  const [launchOnStartup, setLaunchOnStartup] = useState(settings.launchOnStartup === 'true');
+  const [minimizeToTray, setMinimizeToTray] = useState(settings.minimizeToTray === 'true');
+  const [autoSendWithoutPreview, setAutoSendWithoutPreview] = useState(settings.autoSendWithoutPreview !== 'false');
+  const [emailSignature, setEmailSignature] = useState(
+    settings.emailSignature || 
+    `Regards,\n\nAbhijith B\nDeveloper Intern\nKerala Development and Innovation Strategic Council (KDISC)`
+  );
+  const [developerName, setDeveloperName] = useState(settings.developerName || '');
+  const [developerEmail, setDeveloperEmail] = useState(settings.developerEmail || '');
+
+  // Repositories local state
+  const [repoPathInput, setRepoPathInput] = useState('');
+  const [repoError, setRepoError] = useState('');
+  const [repoLoading, setRepoLoading] = useState(false);
+
+  // AI local state
   const [llmProvider, setLlmProvider] = useState(settings.llmProvider || 'gemini');
   const [geminiApiKey, setGeminiApiKey] = useState(settings.geminiApiKey || '');
   const [llmModel, setLlmModel] = useState(settings.llmModel || '');
   const [llmEndpoint, setLlmEndpoint] = useState(settings.llmEndpoint || '');
+  
+  // Multiple providers and backup keys states
+  const [geminiApiKey1, setGeminiApiKey1] = useState(settings.geminiApiKey1 || '');
+  const [geminiApiKey2, setGeminiApiKey2] = useState(settings.geminiApiKey2 || '');
+  const [geminiApiKey3, setGeminiApiKey3] = useState(settings.geminiApiKey3 || '');
+  const [groqApiKey, setGroqApiKey] = useState(settings.groqApiKey || '');
+  const [groqModel, setGroqModel] = useState(settings.groqModel || 'llama-3.3-70b-versatile');
+  const [geminiEnabled, setGeminiEnabled] = useState(settings.geminiEnabled !== 'false');
+  const [groqEnabled, setGroqEnabled] = useState(settings.groqEnabled !== 'false');
 
   // Gmail local state
   const [gmailClientId, setGmailClientId] = useState(settings.gmailClientId || '');
@@ -27,13 +59,13 @@ export default function Settings({
   const [gmailLoading, setGmailLoading] = useState(false);
   const [gmailError, setGmailError] = useState('');
 
-  // Recipients
+  // Recipients local state
   const [emailTo, setEmailTo] = useState(settings.emailTo || '');
   const [emailCc, setEmailCc] = useState(settings.emailCc || '');
   const [emailBcc, setEmailBcc] = useState(settings.emailBcc || '');
 
-  // Google Sheet state
-  const [excelPath, setExcelPath] = useState(settings.excelPath || ''); // Google Sheet URL
+  // Google Sheet local state
+  const [excelPath, setExcelPath] = useState(settings.excelPath || '');
   const [excelSheetName, setExcelSheetName] = useState(settings.excelSheetName || '');
   const [sheetsList, setSheetsList] = useState<string[]>([]);
   const [columnsPreview, setColumnsPreview] = useState<string[]>([]);
@@ -53,10 +85,12 @@ export default function Settings({
     ];
   });
 
-  // Schedule Time
+  // Scheduler local state
   const [reportTime, setReportTime] = useState(settings.reportTime || '17:30');
+  const [workStartTime, setWorkStartTime] = useState(settings.workStartTime || '10:00 AM');
+  const [workEndTime, setWorkEndTime] = useState(settings.workEndTime || '05:30 PM');
 
-  // Success notifications
+  // Success state
   const [saveSuccess, setSaveSuccess] = useState('');
 
   const showSuccessMessage = (msg: string) => {
@@ -64,16 +98,57 @@ export default function Settings({
     setTimeout(() => setSaveSuccess(''), 3000);
   };
 
-  // Save LLM configuration
+  // --- Actions ---
+
+  const handleSaveGeneral = async () => {
+    await saveSetting('launchOnStartup', launchOnStartup ? 'true' : 'false');
+    await saveSetting('minimizeToTray', minimizeToTray ? 'true' : 'false');
+    await saveSetting('autoSendWithoutPreview', autoSendWithoutPreview ? 'true' : 'false');
+    await saveSetting('emailSignature', emailSignature);
+    await saveSetting('developerName', developerName);
+    await saveSetting('developerEmail', developerEmail);
+    showSuccessMessage('General settings saved.');
+  };
+
+  const handleAddRepo = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setRepoError('');
+    if (!repoPathInput.trim()) return;
+
+    setRepoLoading(true);
+    try {
+      const res = await addRepo(repoPathInput.trim());
+      if (res.ok) {
+        setRepoPathInput('');
+        showSuccessMessage('Repository folder added.');
+      } else {
+        setRepoError(res.error || 'Failed to add repository.');
+      }
+    } catch (err: any) {
+      setRepoError(err.message || 'An error occurred.');
+    } finally {
+      setRepoLoading(false);
+    }
+  };
+
   const handleSaveLLM = async () => {
     await saveSetting('llmProvider', llmProvider);
     await saveSetting('geminiApiKey', geminiApiKey);
     await saveSetting('llmModel', llmModel);
     await saveSetting('llmEndpoint', llmEndpoint);
+    
+    // Save new backup keys and provider toggles
+    await saveSetting('geminiApiKey1', geminiApiKey1);
+    await saveSetting('geminiApiKey2', geminiApiKey2);
+    await saveSetting('geminiApiKey3', geminiApiKey3);
+    await saveSetting('groqApiKey', groqApiKey);
+    await saveSetting('groqModel', groqModel);
+    await saveSetting('geminiEnabled', geminiEnabled ? 'true' : 'false');
+    await saveSetting('groqEnabled', groqEnabled ? 'true' : 'false');
+    
     showSuccessMessage('LLM settings saved.');
   };
 
-  // Save Gmail and connect
   const handleConnectGmail = async () => {
     setGmailError('');
     if (!gmailClientId.trim() || !gmailClientSecret.trim()) {
@@ -101,7 +176,6 @@ export default function Settings({
     showSuccessMessage('Recipients settings updated.');
   };
 
-  // Google Sheets detection
   const detectColumnMappings = (columns: string[]) => {
     const result: Array<{ col: string; type: string; fixedValue: string }> = [];
     columns.forEach(colStr => {
@@ -129,7 +203,6 @@ export default function Settings({
     ];
   };
 
-  // Google Sheets inspection
   const handleInspectExcel = async () => {
     setExcelError('');
     setSpreadsheetTitle('');
@@ -149,18 +222,15 @@ export default function Settings({
       if (meta.sheets.length > 0 && !excelSheetName) {
         setExcelSheetName(meta.sheets[0] || '');
       }
-
-      // Auto map
       const autoMappings = detectColumnMappings(meta.columnsPreview);
       setMappings(autoMappings);
     } catch (err: any) {
-      setExcelError(err.message || 'Failed to inspect Google Sheet. Verify URL and make sure Gmail/OAuth is fully authenticated.');
+      setExcelError(err.message || 'Failed to inspect Google Sheet. Verify credentials.');
     } finally {
       setExcelInspecting(false);
     }
   };
 
-  // Save Excel configuration
   const handleSaveExcel = async () => {
     if (!excelPath.trim()) {
       setExcelError('Spreadsheet URL is required.');
@@ -181,22 +251,21 @@ export default function Settings({
     }
   };
 
-  const handleAddMappingRow = () => {
-    const lastCol = mappings[mappings.length - 1]?.col || '@';
-    const nextCol = String.fromCharCode(lastCol.charCodeAt(0) + 1);
-    setMappings([...mappings, { col: nextCol, type: 'empty', fixedValue: '' }]);
-  };
-
-  const handleRemoveMappingRow = (index: number) => {
-    setMappings(mappings.filter((_, i) => i !== index));
-  };
-
-  // Save scheduler settings
   const handleSaveScheduler = async () => {
     await saveSetting('reportTime', reportTime);
-    showSuccessMessage('Scheduler settings updated.');
+    await saveSetting('workStartTime', workStartTime);
+    await saveSetting('workEndTime', workEndTime);
+    showSuccessMessage('Scheduler and work hours updated.');
   };
 
+  const handleResetWizard = async () => {
+    if (confirm('Are you sure you want to reset setup? You will be guided through the Setup Onboarding Wizard again.')) {
+      await saveSetting('setupCompleted', 'false');
+      window.location.reload();
+    }
+  };
+
+  // Mappings Validation
   const hasDateMapping = mappings.some(m => m.type === 'date');
   const hasReportMapping = mappings.some(m => m.type === 'report');
   const mappingValidationError = !hasDateMapping || !hasReportMapping
@@ -204,77 +273,314 @@ export default function Settings({
     : '';
 
   return (
-    <div className="settings-page" style={{ maxWidth: '680px' }}>
-      <div className="settings-page__header">
+    <div className="settings-page" style={{ maxWidth: '780px' }}>
+      <div className="settings-page__header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '24px' }}>
         <div>
           <h2 className="page-title">Settings</h2>
-          <p className="page-subtitle">Configure credentials, spreadsheet maps, schedules, and targets.</p>
+          <p className="page-subtitle">Configure application, credentials, schedulers, and pipeline paths.</p>
         </div>
-        {saveSuccess && <span className="save-toast">{saveSuccess}</span>}
+        {saveSuccess && <span className="save-toast" style={{ background: 'var(--success-bg)', color: 'var(--success-text)', border: '1px solid var(--success-border)', padding: '6px 12px', borderRadius: '20px', fontSize: '12px', fontWeight: '600' }}>{saveSuccess}</span>}
       </div>
 
-      <nav className="settings-nav">
-        <button className={`settings-nav__btn ${activeTab === 'llm' ? 'settings-nav__btn--active' : ''}`} onClick={() => setActiveTab('llm')}>LLM Provider</button>
-        <button className={`settings-nav__btn ${activeTab === 'gmail' ? 'settings-nav__btn--active' : ''}`} onClick={() => setActiveTab('gmail')}>Gmail (OAuth)</button>
-        <button className={`settings-nav__btn ${activeTab === 'excel' ? 'settings-nav__btn--active' : ''}`} onClick={() => setActiveTab('excel')}>Google Sheet</button>
+      {/* Tabs navigation */}
+      <nav className="settings-nav" style={{ display: 'flex', gap: '8px', borderBottom: '1px solid var(--border-light)', paddingBottom: '12px', marginBottom: '24px', overflowX: 'auto' }}>
+        <button className={`settings-nav__btn ${activeTab === 'general' ? 'settings-nav__btn--active' : ''}`} onClick={() => setActiveTab('general')}>General</button>
+        <button className={`settings-nav__btn ${activeTab === 'repositories' ? 'settings-nav__btn--active' : ''}`} onClick={() => setActiveTab('repositories')}>Repositories</button>
+        <button className={`settings-nav__btn ${activeTab === 'ai' ? 'settings-nav__btn--active' : ''}`} onClick={() => setActiveTab('ai')}>AI (Gemini)</button>
+        <button className={`settings-nav__btn ${activeTab === 'google' ? 'settings-nav__btn--active' : ''}`} onClick={() => setActiveTab('google')}>Google API</button>
         <button className={`settings-nav__btn ${activeTab === 'scheduler' ? 'settings-nav__btn--active' : ''}`} onClick={() => setActiveTab('scheduler')}>Scheduler</button>
+        <button className={`settings-nav__btn ${activeTab === 'advanced' ? 'settings-nav__btn--active' : ''}`} onClick={() => setActiveTab('advanced')}>Advanced</button>
       </nav>
 
+      {/* Tabs content */}
       <div className="settings-content">
-        {activeTab === 'llm' && (
-          <div className="card">
-            <h3>LLM Generation Engine</h3>
-            <p className="description">Choose between Google Gemini or OpenAI compatible providers.</p>
-
-            <div className="form-field">
-              <label>LLM Provider</label>
-              <select value={llmProvider} onChange={(e) => setLlmProvider(e.target.value)}>
-                <option value="gemini">Google Gemini (Native API)</option>
-                <option value="openai-compatible">OpenAI-Compatible (e.g. Groq, local models)</option>
-              </select>
+        
+        {/* TAB 1: General */}
+        {activeTab === 'general' && (
+          <div className="card" style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
+            <div>
+              <h3>General Configurations</h3>
+              <p className="description">Manage background running options and visual defaults.</p>
             </div>
 
-            <div className="form-field">
-              <label>API Key</label>
-              <input 
-                type="password" 
-                placeholder="Paste API key here..."
-                value={geminiApiKey}
-                onChange={(e) => setGeminiApiKey(e.target.value)}
-              />
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+              <label style={{ display: 'flex', alignItems: 'center', gap: '10px', fontSize: '13px', cursor: 'pointer' }}>
+                <input 
+                  type="checkbox" 
+                  checked={launchOnStartup} 
+                  onChange={(e) => setLaunchOnStartup(e.target.checked)} 
+                  style={{ width: '16px', height: '16px' }}
+                />
+                Launch Thalavedana automatically on system startup
+              </label>
+
+              <label style={{ display: 'flex', alignItems: 'center', gap: '10px', fontSize: '13px', cursor: 'pointer' }}>
+                <input 
+                  type="checkbox" 
+                  checked={minimizeToTray} 
+                  onChange={(e) => setMinimizeToTray(e.target.checked)} 
+                  style={{ width: '16px', height: '16px' }}
+                />
+                Minimize application to system tray instead of quitting on window close
+              </label>
+
+              <label style={{ display: 'flex', alignItems: 'center', gap: '10px', fontSize: '13px', cursor: 'pointer' }}>
+                <input 
+                  type="checkbox" 
+                  checked={autoSendWithoutPreview} 
+                  onChange={(e) => setAutoSendWithoutPreview(e.target.checked)} 
+                  style={{ width: '16px', height: '16px' }}
+                />
+                Auto-send daily updates without presenting preview dialog (Hands-off mode)
+              </label>
             </div>
 
-            <div className="form-field">
-              <label>Model Name</label>
-              <input 
-                type="text" 
-                placeholder={llmProvider === 'gemini' ? 'Auto-detected' : 'gpt-4o-mini'}
-                value={llmModel}
-                onChange={(e) => setLlmModel(e.target.value)}
-              />
-            </div>
-
-            {llmProvider === 'openai-compatible' && (
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
               <div className="form-field">
-                <label>Endpoint URL</label>
+                <label>Developer Name (for Git attribution)</label>
                 <input 
                   type="text" 
-                  placeholder="https://api.openai.com/v1/chat/completions"
-                  value={llmEndpoint}
-                  onChange={(e) => setLlmEndpoint(e.target.value)}
+                  value={developerName} 
+                  onChange={(e) => setDeveloperName(e.target.value)}
+                  placeholder="e.g. Abhijith B"
                 />
               </div>
-            )}
+              <div className="form-field">
+                <label>Developer Email (for Git attribution)</label>
+                <input 
+                  type="email" 
+                  value={developerEmail} 
+                  onChange={(e) => setDeveloperEmail(e.target.value)}
+                  placeholder="e.g. abhijithb200cr@gmail.com"
+                />
+              </div>
+            </div>
 
-            <button className="btn btn--primary" style={{ marginTop: '8px' }} onClick={handleSaveLLM}>Save LLM Settings</button>
+            <div className="form-field">
+              <label>Default Email Signature</label>
+              <textarea 
+                value={emailSignature}
+                onChange={(e) => setEmailSignature(e.target.value)}
+                placeholder="Regards, Your Name..."
+                style={{ width: '100%', minHeight: '100px', padding: '10px', borderRadius: '8px', border: '1px solid var(--border-light)', fontSize: '13px', fontFamily: 'inherit' }}
+              />
+            </div>
+
+            <button className="btn btn--primary" style={{ alignSelf: 'flex-start' }} onClick={handleSaveGeneral}>Save General Settings</button>
           </div>
         )}
 
-        {activeTab === 'gmail' && (
+        {/* TAB 2: Repositories */}
+        {activeTab === 'repositories' && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
             <div className="card">
-              <h3>Gmail OAuth Credentials</h3>
-              <p className="description">Review details for Google OAuth listener loopback.</p>
+              <h3>Add Repository Folder</h3>
+              <p className="description">Select a new folder to monitor for daily Git commits.</p>
+              
+              <form onSubmit={handleAddRepo} className="form-group row" style={{ display: 'flex', gap: '8px', marginTop: '12px' }}>
+                <input 
+                  type="text" 
+                  placeholder="/home/username/Projects/my-project"
+                  value={repoPathInput}
+                  onChange={(e) => setRepoPathInput(e.target.value)}
+                  disabled={repoLoading}
+                  style={{ flexGrow: 1 }}
+                />
+                <button type="submit" className="btn btn--primary" disabled={repoLoading}>
+                  {repoLoading ? 'Verifying...' : 'Add Repo'}
+                </button>
+              </form>
+              {repoError && <p className="error-text" style={{ marginTop: '10px' }}>{repoError}</p>}
+            </div>
+
+            <div className="card">
+              <h3>Monitored Folders</h3>
+              {repos.length === 0 ? (
+                <p className="dimmed" style={{ padding: '24px 0', textAlign: 'center' }}>No repository folders configured yet.</p>
+              ) : (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', marginTop: '12px' }}>
+                  {repos.map((repo) => (
+                    <div key={repo.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'var(--accent-light)', padding: '12px 16px', borderRadius: '8px', border: '1px solid var(--border-light)' }}>
+                      <div>
+                        <div style={{ fontWeight: '700', fontSize: '13px' }}>
+                          {repo.name}
+                          {repo.activeBranch && <span style={{ fontSize: '10px', color: 'var(--text-muted)', background: 'var(--bg-app)', padding: '2px 6px', borderRadius: '10px', marginLeft: '8px', fontWeight: '500' }}>Branch: {repo.activeBranch}</span>}
+                        </div>
+                        <span style={{ fontSize: '11px', color: 'var(--text-muted)', display: 'block', wordBreak: 'break-all', marginTop: '2px' }}>{repo.path}</span>
+                        {repo.lastCommitTime && (
+                          <div style={{ fontSize: '10px', color: 'var(--text-muted)', marginTop: '4px' }}>
+                            Last Commit: {repo.lastCommitTime} • Last Scan: {repo.lastScanTime || 'Never'}
+                          </div>
+                        )}
+                        {repo.error && <p className="error-text" style={{ fontSize: '10px', marginTop: '4px' }}>Error: {repo.error}</p>}
+                      </div>
+                      <button className="btn btn--danger btn--sm" onClick={() => removeRepo(repo.id)}>Remove</button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* TAB 3: AI (Providers & Fallbacks) */}
+        {activeTab === 'ai' && (
+          <div className="card" style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
+            <div>
+              <h3>AI Summary Engine & Fallback Chain</h3>
+              <p className="description">
+                Configure your LLM providers. Thalavedana will execute fallbacks in order to ensure the reliability of daily report generation.
+              </p>
+            </div>
+
+            {/* General Mode selection */}
+            <div className="form-field">
+              <label>Default LLM Provider Selection</label>
+              <select value={llmProvider} onChange={(e) => setLlmProvider(e.target.value)}>
+                <option value="gemini">Google Gemini (Native API)</option>
+                <option value="openai-compatible">OpenAI-Compatible (e.g. Local Models)</option>
+              </select>
+            </div>
+
+            <hr style={{ border: 'none', borderTop: '1px solid var(--border-light)', margin: 0 }} />
+
+            {/* Gemini Section */}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <h4 style={{ margin: 0, fontWeight: '700', fontSize: '14px', color: 'var(--text-main)' }}>Google Gemini Settings</h4>
+                <label style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '12px', cursor: 'pointer', fontWeight: 600 }}>
+                  <input 
+                    type="checkbox" 
+                    checked={geminiEnabled} 
+                    onChange={(e) => setGeminiEnabled(e.target.checked)} 
+                    style={{ width: '14px', height: '14px' }}
+                  />
+                  Enable Gemini
+                </label>
+              </div>
+
+              {geminiEnabled && (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', paddingLeft: '8px', borderLeft: '2px solid var(--accent)' }}>
+                  <div className="form-field">
+                    <label>Gemini API Key #1 (Primary)</label>
+                    <input 
+                      type="password" 
+                      placeholder="Paste primary Gemini API key..."
+                      value={geminiApiKey1}
+                      onChange={(e) => {
+                        setGeminiApiKey1(e.target.value);
+                        setGeminiApiKey(e.target.value); // keep legacy key in sync
+                      }}
+                    />
+                  </div>
+
+                  <div className="form-field">
+                    <label>Gemini API Key #2 (Backup)</label>
+                    <input 
+                      type="password" 
+                      placeholder="Paste backup Gemini API key..."
+                      value={geminiApiKey2}
+                      onChange={(e) => setGeminiApiKey2(e.target.value)}
+                    />
+                  </div>
+
+                  <div className="form-field">
+                    <label>Gemini API Key #3 (Fallback)</label>
+                    <input 
+                      type="password" 
+                      placeholder="Paste tertiary Gemini API key..."
+                      value={geminiApiKey3}
+                      onChange={(e) => setGeminiApiKey3(e.target.value)}
+                    />
+                  </div>
+
+                  <div className="form-field">
+                    <label>Preferred Gemini Model</label>
+                    <input 
+                      type="text" 
+                      placeholder="e.g. gemini-1.5-flash or gemini-2.5-flash"
+                      value={llmModel}
+                      onChange={(e) => setLlmModel(e.target.value)}
+                    />
+                    <p style={{ margin: '4px 0 0 0', fontSize: '11px', color: 'var(--text-muted)' }}>
+                      If not specified, Thalavedana will auto-discover the best active Gemini model.
+                    </p>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            <hr style={{ border: 'none', borderTop: '1px solid var(--border-light)', margin: 0 }} />
+
+            {/* Groq / Backup Provider Section */}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <h4 style={{ margin: 0, fontWeight: '700', fontSize: '14px', color: 'var(--text-main)' }}>Groq API Fallback</h4>
+                <label style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '12px', cursor: 'pointer', fontWeight: 600 }}>
+                  <input 
+                    type="checkbox" 
+                    checked={groqEnabled} 
+                    onChange={(e) => setGroqEnabled(e.target.checked)} 
+                    style={{ width: '14px', height: '14px' }}
+                  />
+                  Enable Groq Fallback
+                </label>
+              </div>
+
+              {groqEnabled && (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', paddingLeft: '8px', borderLeft: '2px solid var(--warning)' }}>
+                  <div className="form-field">
+                    <label>Groq API Key</label>
+                    <input 
+                      type="password" 
+                      placeholder="gsk_..."
+                      value={groqApiKey}
+                      onChange={(e) => setGroqApiKey(e.target.value)}
+                    />
+                  </div>
+
+                  <div className="form-field">
+                    <label>Groq Model Identifier</label>
+                    <input 
+                      type="text" 
+                      placeholder="e.g. llama-3.3-70b-versatile"
+                      value={groqModel}
+                      onChange={(e) => setGroqModel(e.target.value)}
+                    />
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {llmProvider === 'openai-compatible' && (
+              <>
+                <hr style={{ border: 'none', borderTop: '1px solid var(--border-light)', margin: 0 }} />
+                <div className="form-field">
+                  <label>Custom OpenAI Endpoint URL</label>
+                  <input 
+                    type="text" 
+                    placeholder="https://api.openai.com/v1/chat/completions"
+                    value={llmEndpoint}
+                    onChange={(e) => setLlmEndpoint(e.target.value)}
+                  />
+                </div>
+              </>
+            )}
+
+            <button className="btn btn--primary" style={{ alignSelf: 'flex-start' }} onClick={handleSaveLLM}>
+              Save AI Settings & Fallbacks
+            </button>
+          </div>
+        )}
+
+        {/* TAB 4: Google API (Gmail, Sheets) */}
+        {activeTab === 'google' && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
+            
+            {/* Google OAuth & Gmail section */}
+            <div className="card">
+              <h3>Google Accounts & Gmail Authentication</h3>
+              <p className="description">Configure Gmail and Sheets Google integration.</p>
 
               <div className="form-field">
                 <label>OAuth Client ID</label>
@@ -285,7 +591,7 @@ export default function Settings({
                   onChange={(e) => setGmailClientId(e.target.value)}
                 />
               </div>
-              
+
               <div className="form-field">
                 <label>OAuth Client Secret</label>
                 <input 
@@ -298,28 +604,29 @@ export default function Settings({
 
               {gmailError && <p className="error-text" style={{ marginBottom: '12px' }}>{gmailError}</p>}
 
-              <div className="auth-connection-status">
+              <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginTop: '12px' }}>
                 {settings.gmailUserEmail ? (
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-                    <div className="success-banner" style={{ flexGrow: 1 }}>
-                      Connected account: <strong>{settings.gmailUserEmail}</strong>
-                    </div>
-                    <button className="btn btn--secondary" onClick={handleConnectGmail}>Re-connect</button>
+                  <div className="success-banner" style={{ flexGrow: 1 }}>
+                    Linked account: <strong>{settings.gmailUserEmail}</strong>
                   </div>
                 ) : (
-                  <button className="btn btn--primary" onClick={handleConnectGmail} disabled={gmailLoading}>
-                    {gmailLoading ? 'Awaiting authorization...' : 'Authorize Gmail Account'}
-                  </button>
+                  <div className="error-banner" style={{ flexGrow: 1 }}>
+                    No Google account is currently authenticated.
+                  </div>
                 )}
+                <button className="btn btn--secondary" onClick={handleConnectGmail} disabled={gmailLoading}>
+                  {gmailLoading ? 'Authorizing...' : settings.gmailUserEmail ? 'Re-authorize' : 'Authorize Account'}
+                </button>
               </div>
             </div>
 
+            {/* Email dispatch recipients */}
             <div className="card">
-              <h3>Email Delivery Targets</h3>
-              <p className="description">Edit default recipient and copy addresses.</p>
+              <h3>Gmail Targets</h3>
+              <p className="description">Set standard report recipients.</p>
 
               <div className="form-field">
-                <label>To (Recipients, comma-separated)</label>
+                <label>To (Recipients, comma separated)</label>
                 <input 
                   type="text" 
                   placeholder="manager@org.com, supervisor@org.com"
@@ -327,15 +634,17 @@ export default function Settings({
                   onChange={(e) => setEmailTo(e.target.value)}
                 />
               </div>
+
               <div className="form-field">
                 <label>Cc (Carbon Copy)</label>
                 <input 
                   type="text" 
-                  placeholder="internship@org.com"
+                  placeholder="team@org.com"
                   value={emailCc}
                   onChange={(e) => setEmailCc(e.target.value)}
                 />
               </div>
+
               <div className="form-field">
                 <label>Bcc (Blind Carbon Copy)</label>
                 <input 
@@ -346,163 +655,133 @@ export default function Settings({
                 />
               </div>
 
-              <button className="btn btn--primary" onClick={handleSaveRecipients}>Save Email Targets</button>
+              <button className="btn btn--primary" onClick={handleSaveRecipients}>Save Targets</button>
             </div>
-          </div>
-        )}
 
-        {activeTab === 'excel' && (
-          <div className="card">
-            <h3>Google Spreadsheet Reporting</h3>
-            <p className="description">Ensure the workbook matches your daily tracking layout.</p>
+            {/* Google Sheets Workbook Section */}
+            <div className="card">
+              <h3>Google Sheets Target</h3>
+              <p className="description">Specify Google Sheets target settings and verify structure.</p>
 
-            <form onSubmit={(e) => { e.preventDefault(); handleInspectExcel(); }} className="form-group row" style={{ marginBottom: '16px' }}>
-              <input 
-                type="text" 
-                placeholder="https://docs.google.com/spreadsheets/d/.../edit"
-                value={excelPath}
-                onChange={(e) => setExcelPath(e.target.value)}
-              />
-              <button type="submit" className="btn btn--secondary" disabled={excelInspecting}>
-                {excelInspecting ? 'Verifying...' : 'Verify Spreadsheet'}
-              </button>
-            </form>
-            
-            {excelError && (
-              <div style={{ marginBottom: '16px' }}>
-                <p className="error-text" style={{ marginBottom: '8px' }}>{excelError}</p>
-                {excelError.includes('Access denied') && (
-                  <button 
-                    type="button" 
-                    className="btn btn--primary btn--sm" 
-                    onClick={async () => {
-                      setExcelError('');
-                      setExcelInspecting(true);
-                      try {
-                        await connectGmail();
-                        setTimeout(() => handleInspectExcel(), 2000);
-                      } catch (err: any) {
-                        setExcelError(`Authorization failed: ${err.message}`);
-                      } finally {
-                        setExcelInspecting(false);
-                      }
-                    }}
-                  >
-                    Authorize Google Sheets Access
-                  </button>
-                )}
+              <div style={{ display: 'flex', gap: '8px', marginBottom: '16px' }}>
+                <input 
+                  type="text" 
+                  placeholder="https://docs.google.com/spreadsheets/d/.../edit"
+                  value={excelPath}
+                  onChange={(e) => setExcelPath(e.target.value)}
+                  style={{ flexGrow: 1 }}
+                />
+                <button className="btn btn--secondary" onClick={handleInspectExcel} disabled={excelInspecting}>
+                  {excelInspecting ? 'Verifying...' : 'Verify Sheet'}
+                </button>
               </div>
-            )}
 
-            {sheetsList.length > 0 && (
-              <div className="excel-setup-box" style={{ marginTop: '16px', padding: 0, border: 'none' }}>
-                <div style={{ marginBottom: '16px', background: 'var(--success-bg)', padding: '12px 16px', borderRadius: '8px', border: '1px solid var(--success-border)', color: 'var(--success-text)', fontSize: '13px' }}>
-                  Spreadsheet Title: <strong>{spreadsheetTitle}</strong>
+              {excelError && (
+                <div style={{ marginBottom: '16px' }}>
+                  <p className="error-text">{excelError}</p>
                 </div>
+              )}
 
-                <div className="form-field">
-                  <label>Worksheet Name</label>
-                  <select value={excelSheetName} onChange={(e) => setExcelSheetName(e.target.value)}>
-                    {sheetsList.map(s => <option key={s} value={s}>{s}</option>)}
-                    {!sheetsList.includes(excelSheetName) && excelSheetName && <option value={excelSheetName}>{excelSheetName}</option>}
-                  </select>
+              {spreadsheetTitle && (
+                <div style={{ background: 'var(--success-bg)', border: '1px solid var(--success-border)', color: 'var(--success-text)', padding: '12px 16px', borderRadius: '8px', marginBottom: '16px', fontSize: '13px' }}>
+                  Target spreadsheet loaded: <strong>{spreadsheetTitle}</strong>
                 </div>
+              )}
 
-                {columnsPreview.length > 0 && (
-                  <div className="excel-columns-preview">
-                    <strong>Header Rows Preview:</strong>
-                    <div className="preview-tags">
-                      {columnsPreview.map((c, i) => (
-                        <span key={i} className="preview-tag">{c}</span>
-                      ))}
-                    </div>
+              {sheetsList.length > 0 && (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+                  <div className="form-field">
+                    <label>Worksheet Tab Name</label>
+                    <select value={excelSheetName} onChange={(e) => setExcelSheetName(e.target.value)}>
+                      {sheetsList.map(tabName => <option key={tabName} value={tabName}>{tabName}</option>)}
+                    </select>
                   </div>
-                )}
 
-                <div className="mapping-table" style={{ marginTop: '24px' }}>
-                  <h4>Column Configuration Mapping</h4>
-                  <table className="table">
-                    <thead>
-                      <tr>
-                        <th>Col</th>
-                        <th>Source Field</th>
-                        <th>Fixed Value</th>
-                        <th></th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {mappings.map((m, i) => (
-                        <tr key={i}>
-                          <td>
-                            <input 
-                              type="text" 
-                              value={m.col} 
-                              onChange={(e) => handleUpdateMapping(i, 'col', e.target.value.toUpperCase())}
-                              style={{ width: '50px', padding: '6px', textAlign: 'center' }}
-                            />
-                          </td>
-                          <td>
-                            <select 
-                              value={m.type} 
-                              onChange={(e) => handleUpdateMapping(i, 'type', e.target.value)}
-                            >
-                              <option value="date">Report Date (YYYY-MM-DD)</option>
-                              <option value="report">LLM Work Report Summary</option>
-                              <option value="repositories">Configured Repositories</option>
-                              <option value="fixed">Fixed Static String</option>
-                              <option value="empty">Leave Cell Blank</option>
-                            </select>
-                          </td>
-                          <td>
-                            {m.type === 'fixed' ? (
-                              <input 
-                                type="text" 
-                                placeholder="Fixed string..."
-                                value={m.fixedValue}
-                                onChange={(e) => handleUpdateMapping(i, 'fixedValue', e.target.value)}
-                                style={{ width: '120px', padding: '6px' }}
-                              />
-                            ) : (
-                              <span className="dimmed">Not applicable</span>
-                            )}
-                          </td>
-                          <td>
-                            <button className="btn btn--danger btn--sm" onClick={() => setMappings(mappings.filter((_, idx) => idx !== i))}>Remove</button>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                  
-                  {mappingValidationError && (
-                    <div className="error-banner" style={{ marginTop: '16px', marginBottom: '16px' }}>
-                      {mappingValidationError}
+                  {columnsPreview.length > 0 && (
+                    <div style={{ background: 'var(--accent-light)', border: '1px solid var(--border-light)', padding: '12px', borderRadius: '8px' }}>
+                      <strong style={{ fontSize: '12px', color: 'var(--text-main)', display: 'block', marginBottom: '6px' }}>Header Row Columns Found:</strong>
+                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
+                        {columnsPreview.map((colStr, idx) => <span key={idx} style={{ background: '#FFFFFF', border: '1px solid var(--border-light)', borderRadius: '4px', padding: '2px 8px', fontSize: '11px', color: 'var(--text-muted)' }}>{colStr}</span>)}
+                      </div>
                     </div>
                   )}
 
-                  <div style={{ display: 'flex', gap: '10px', marginTop: '16px' }}>
-                    <button className="btn btn--secondary btn--sm" onClick={() => setMappings([...mappings, { col: '', type: 'empty', fixedValue: '' }])}>+ Add Column</button>
-                    <button 
-                      className="btn btn--primary btn--sm" 
-                      onClick={handleSaveExcel}
-                      disabled={!!mappingValidationError}
-                    >
-                      Save Mapping & URL
-                    </button>
+                  <div>
+                    <h4 style={{ fontSize: '12px', fontWeight: '700', marginBottom: '8px' }}>Column Mapping Table</h4>
+                    <table className="table" style={{ width: '100%', fontSize: '12px' }}>
+                      <thead>
+                        <tr>
+                          <th>Col</th>
+                          <th>Field Mapping</th>
+                          <th>Static String</th>
+                          <th></th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {mappings.map((m, idx) => (
+                          <tr key={idx}>
+                            <td>
+                              <input 
+                                type="text" 
+                                value={m.col} 
+                                onChange={(e) => handleUpdateMapping(idx, 'col', e.target.value.toUpperCase())}
+                                style={{ width: '48px', padding: '6px', textAlign: 'center' }}
+                              />
+                            </td>
+                            <td>
+                              <select value={m.type} onChange={(e) => handleUpdateMapping(idx, 'type', e.target.value)}>
+                                <option value="date">Report Date (YYYY-MM-DD)</option>
+                                <option value="report">LLM Work Summary</option>
+                                <option value="repositories">Monitored Repositories</option>
+                                <option value="work_start">Work Start Time</option>
+                                <option value="work_end">Work End Time</option>
+                                <option value="fixed">Static Fixed Text</option>
+                                <option value="empty">Leave Empty</option>
+                              </select>
+                            </td>
+                            <td>
+                              {m.type === 'fixed' ? (
+                                <input 
+                                  type="text" 
+                                  value={m.fixedValue}
+                                  onChange={(e) => handleUpdateMapping(idx, 'fixedValue', e.target.value)}
+                                  placeholder="Fixed value..."
+                                  style={{ width: '100%', padding: '6px' }}
+                                />
+                              ) : <span className="dimmed">N/A</span>}
+                            </td>
+                            <td>
+                              <button className="btn btn--danger btn--sm" onClick={() => setMappings(mappings.filter((_, i) => i !== idx))}>✕</button>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+
+                    {mappingValidationError && <p className="error-text" style={{ marginTop: '8px' }}>{mappingValidationError}</p>}
+
+                    <div style={{ display: 'flex', gap: '8px', marginTop: '12px' }}>
+                      <button className="btn btn--secondary btn--sm" onClick={() => setMappings([...mappings, { col: '', type: 'empty', fixedValue: '' }])}>+ Add Col</button>
+                      <button className="btn btn--primary btn--sm" onClick={handleSaveExcel} disabled={!!mappingValidationError}>Save Sheets Settings</button>
+                    </div>
                   </div>
                 </div>
-              </div>
-            )}
+              )}
+            </div>
+
           </div>
         )}
 
+        {/* TAB 5: Scheduler */}
         {activeTab === 'scheduler' && (
-          <div className="card">
-            <h3>Scheduler Configurations</h3>
-            <p className="description">Execution settings for automatic generation.</p>
+          <div className="card" style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
+            <div>
+              <h3>Automation Scheduler</h3>
+              <p className="description">Schedule automated daily checks and runs.</p>
+            </div>
 
-            <div className="form-field" style={{ maxWidth: '200px' }}>
-              <label>Daily Scheduled Report Time</label>
+            <div className="form-field" style={{ maxWidth: '240px' }}>
+              <label>Daily Execution Time (24h)</label>
               <input 
                 type="time" 
                 value={reportTime} 
@@ -510,9 +789,47 @@ export default function Settings({
               />
             </div>
 
-            <button className="btn btn--primary" onClick={handleSaveScheduler}>Save Scheduler Settings</button>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px', maxWidth: '360px' }}>
+              <div className="form-field">
+                <label>Work Start Time</label>
+                <input 
+                  type="text" 
+                  value={workStartTime} 
+                  onChange={(e) => setWorkStartTime(e.target.value)}
+                  placeholder="e.g. 10:00 AM"
+                />
+              </div>
+              <div className="form-field">
+                <label>Work End Time</label>
+                <input 
+                  type="text" 
+                  value={workEndTime} 
+                  onChange={(e) => setWorkEndTime(e.target.value)}
+                  placeholder="e.g. 05:30 PM"
+                />
+              </div>
+            </div>
+
+            <button className="btn btn--primary" style={{ alignSelf: 'flex-start' }} onClick={handleSaveScheduler}>Save Scheduler Settings</button>
           </div>
         )}
+
+        {/* TAB 6: Advanced */}
+        {activeTab === 'advanced' && (
+          <div className="card" style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
+            <div>
+              <h3>Advanced & Diagnostics</h3>
+              <p className="description">Reset user settings, wipe files, or debug backend details.</p>
+            </div>
+
+            <div style={{ background: 'var(--danger-bg)', border: '1px solid var(--danger-border)', color: 'var(--danger-text)', padding: '16px', borderRadius: '8px' }}>
+              <h4 style={{ fontWeight: '700', fontSize: '14px', marginBottom: '6px' }}>Danger Zone</h4>
+              <p style={{ fontSize: '12px', color: 'var(--danger-text)', opacity: 0.85, marginBottom: '12px' }}>Resetting setup will delete all stored session details and restart setup wizard.</p>
+              <button className="btn btn--danger" onClick={handleResetWizard}>Reset Onboarding Wizard</button>
+            </div>
+          </div>
+        )}
+
       </div>
     </div>
   );

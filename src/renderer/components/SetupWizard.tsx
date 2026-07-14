@@ -67,6 +67,8 @@ export default function SetupWizard({
 
   // Time
   const [reportTime, setReportTime] = useState(settings.reportTime || '17:30');
+  const [workStartTime, setWorkStartTime] = useState(settings.workStartTime || '10:00 AM');
+  const [workEndTime, setWorkEndTime] = useState(settings.workEndTime || '05:30 PM');
 
   // Step 1: Add Git Repository
   const handleAddRepo = async (e: React.FormEvent) => {
@@ -219,6 +221,8 @@ export default function SetupWizard({
   // Step 6: Complete Wizard
   const handleCompleteSetup = async () => {
     await saveSetting('reportTime', reportTime);
+    await saveSetting('workStartTime', workStartTime);
+    await saveSetting('workEndTime', workEndTime);
     await saveSetting('setupCompleted', 'true');
     await refreshAll();
   };
@@ -567,6 +571,8 @@ export default function SetupWizard({
                               <option value="date">Report Date (YYYY-MM-DD)</option>
                               <option value="report">LLM Work Report Summary</option>
                               <option value="repositories">Configured Repositories</option>
+                              <option value="work_start">Work Start Time</option>
+                              <option value="work_end">Work End Time</option>
                               <option value="fixed">Fixed Static String</option>
                               <option value="empty">Leave Cell Blank</option>
                             </select>
@@ -622,13 +628,34 @@ export default function SetupWizard({
               Choose the scheduled local time for automated executions daily.
             </p>
 
-            <div className="form-field" style={{ maxWidth: '200px' }}>
+            <div className="form-field" style={{ maxWidth: '200px', marginBottom: '16px' }}>
               <label>Execution Time</label>
               <input 
                 type="time" 
                 value={reportTime} 
                 onChange={(e) => setReportTime(e.target.value)}
               />
+            </div>
+
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px', maxWidth: '360px', marginBottom: '24px' }}>
+              <div className="form-field">
+                <label>Work Start Time</label>
+                <input 
+                  type="text" 
+                  value={workStartTime} 
+                  onChange={(e) => setWorkStartTime(e.target.value)}
+                  placeholder="e.g. 10:00 AM"
+                />
+              </div>
+              <div className="form-field">
+                <label>Work End Time</label>
+                <input 
+                  type="text" 
+                  value={workEndTime} 
+                  onChange={(e) => setWorkEndTime(e.target.value)}
+                  placeholder="e.g. 05:30 PM"
+                />
+              </div>
             </div>
 
             <div className="wizard__actions">

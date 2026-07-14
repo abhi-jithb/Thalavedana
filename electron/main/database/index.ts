@@ -1,4 +1,4 @@
-import { app, safeStorage } from 'electron';
+import { app, safeStorage, BrowserWindow } from 'electron';
 import { DatabaseSync } from 'node:sqlite';
 import path from 'node:path';
 import fs from 'node:fs';
@@ -7,6 +7,10 @@ let db: DatabaseSync | null = null;
 
 const SENSITIVE_KEYS = [
   'geminiApiKey',
+  'geminiApiKey1',
+  'geminiApiKey2',
+  'geminiApiKey3',
+  'groqApiKey',
   'gmailClientSecret',
   'gmailRefreshToken',
   'gmailAccessToken',
@@ -156,6 +160,9 @@ export function getSettings(): Record<string, string> {
     const isEnc = row.is_encrypted || 0;
     settingsObj[row.key] = decryptVal(row.key, row.value, isEnc);
   }
+  // Default values
+  settingsObj.workStartTime = settingsObj.workStartTime || '10:00 AM';
+  settingsObj.workEndTime = settingsObj.workEndTime || '05:30 PM';
   return settingsObj;
 }
 
@@ -164,6 +171,31 @@ export function saveSetting(key: string, value: string) {
   const { value: finalVal, isEncrypted } = encryptVal(key, value);
   const stmt = database.prepare('INSERT OR REPLACE INTO settings (key, value, is_encrypted) VALUES (?, ?, ?)');
   stmt.run(key, finalVal, isEncrypted);
+
+  if (key === 'launchOnStartup') {
+    try {
+      const enabled = value === 'true';
+      app.setLoginItemSettings({
+        openAtLogin: enabled,
+        path: app.getPath('exe')
+      });
+      logToDb('INFO', 'SYSTEM', `Set launch on startup: ${enabled}`);
+    } catch (e: any) {
+      logToDb('ERROR', 'SYSTEM', `Failed to set launch on startup: ${e.message}`);
+    }
+  }
+
+  // Notify renderer windows
+  try {
+    const windows = BrowserWindow.getAllWindows();
+    for (const win of windows) {
+      if (!win.isDestroyed()) {
+        win.webContents.send('settings:updated', getSettings());
+      }
+    }
+  } catch (err: any) {
+    // Ignore if windows aren't ready
+  }
 }
 
 export function deleteSetting(key: string) {
