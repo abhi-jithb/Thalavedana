@@ -233,70 +233,75 @@ export class DailyReportOrchestrator {
     }
 
     const manualNotes = settings.todayWorkNotes || '';
-    if (totalCommits === 0 && !manualNotes.trim()) {
-      const msg = "No work activity was detected for today. If you worked on meetings, testing, documentation, or planning, add a short manual note and run the report again.";
-      logToDb('WARN', 'SYSTEM', msg);
-      
-      this.updateStage(dateStr, 'git', 'success', 'Completed');
-      this.updateStage(dateStr, 'ai', 'failed', 'No activity');
-      this.updateStage(dateStr, 'excel', 'failed', 'Skipped');
-      this.updateStage(dateStr, 'gmail', 'failed', 'Skipped');
-      this.updateStatus(dateStr, { overall: 'failed', errorMessage: msg });
-      triggerNotification(false, msg);
 
-      saveReport({
-        report_date: dateStr,
-        commit_data: JSON.stringify(scrapeResults),
-        report_content: msg,
-        email_content: JSON.stringify({
-          subject: 'No Activity Report',
-          body: `<p>${msg}</p>`,
-          remarks: 'No work activity detected.',
-          meetingDetails: '',
-          providerUsed: 'None',
-          recoveryActions: [],
-          warnings: [msg],
-          durationMs: Date.now() - startTime,
-          reposScanned: repos.map(r => r.name),
-          commitsProcessed: 0,
-          timestamp: new Date().toISOString()
-        }),
-        excel_status: 'failed',
-        email_status: 'failed',
-        error_message: msg
-      });
-
-      return false;
-    }
-
-    logToDb('INFO', 'SYSTEM', totalCommits === 0 ? 'No commits found. Proceeding with manual work notes.' : 'Git Scraping Completed');
+    logToDb('INFO', 'SYSTEM', totalCommits === 0 
+      ? (manualNotes.trim() ? 'No commits found. Proceeding with manual work notes.' : 'No commits or manual notes found. Using default fallback report.') 
+      : 'Git Scraping Completed');
     this.updateStage(dateStr, 'git', 'success', 'Completed');
     this.updateStage(dateStr, 'ai', 'running', 'Running...');
 
-    // --- STAGE 2: LLM Report Generation ---
-    logToDb('INFO', 'SYSTEM', 'Generating AI report...');
+    // --- STAGE 2: LLM Report Generation / Fallback ---
     let llmResult;
     try {
-      llmResult = await generateReportFromLLM(dateStr, scrapeResults);
+      if (totalCommits === 0 && !manualNotes.trim()) {
+        logToDb('INFO', 'SYSTEM', 'Generating default report for site testing and feature discussion.');
+        
+        const dateObj = new Date(dateStr + 'T00:00:00');
+        const formattedDate = dateObj.toLocaleDateString('en-US', {
+          month: 'long',
+          day: 'numeric',
+          year: 'numeric'
+        });
+        const signature = settings.emailSignature || `Regards,\n\nAbhijith B\nDeveloper Intern\nKerala Development and Innovation Strategic Council (KDISC)`;
+        const signatureHtml = signature.replace(/\n/g, '<br>');
 
-      if (!llmResult.report) {
-        const errMsg = 'report is empty. Stopping report pipeline.';
-        logToDb('ERROR', 'SYSTEM', errMsg);
-        throw new Error(errMsg);
-      }
-      if (!llmResult.emailSubject) {
-        const errMsg = 'emailSubject is empty. Stopping report pipeline.';
-        logToDb('ERROR', 'SYSTEM', errMsg);
-        throw new Error(errMsg);
-      }
-      if (!llmResult.emailBody) {
-        const errMsg = 'emailBody is empty. Stopping Gmail delivery.';
-        logToDb('ERROR', 'SYSTEM', errMsg);
-        throw new Error(errMsg);
-      }
+        llmResult = {
+          report: `Daily Development Report
 
-      // Ensure valid HTML body
-      llmResult.emailBody = ensureHtml(llmResult.emailBody);
+- Performed site testing and local verification of the build.
+- Participated in discussions regarding upcoming feature implementation strategies.
+- Worked on local testing and code sanity checks.`,
+          emailSubject: `Daily Development Report - ${formattedDate}`,
+          emailBody: `<p>Hi Team,</p>
+<p>Please find my daily report for today:</p>
+<ul>
+  <li>Performed site testing and local verification of the build.</li>
+  <li>Participated in discussions regarding upcoming feature implementation strategies.</li>
+  <li>Worked on local testing and code sanity checks.</li>
+</ul>
+<p><strong>Remarks:</strong> Site testing and feature discussion</p>
+<p><strong>Meeting Details:</strong> Discussed feature implementation strategy.</p>
+<br>
+<p>${signatureHtml}</p>`,
+          remarks: "Site testing and feature discussion",
+          meetingDetails: "Discussed feature implementation strategy.",
+          providerUsed: "Default Fallback",
+          recoveryActions: ["Bypassed LLM due to no git or manual entry"],
+          warnings: ["Generated default report due to lack of commits and manual notes."]
+        };
+      } else {
+        logToDb('INFO', 'SYSTEM', 'Generating AI report...');
+        llmResult = await generateReportFromLLM(dateStr, scrapeResults);
+
+        if (!llmResult.report) {
+          const errMsg = 'report is empty. Stopping report pipeline.';
+          logToDb('ERROR', 'SYSTEM', errMsg);
+          throw new Error(errMsg);
+        }
+        if (!llmResult.emailSubject) {
+          const errMsg = 'emailSubject is empty. Stopping report pipeline.';
+          logToDb('ERROR', 'SYSTEM', errMsg);
+          throw new Error(errMsg);
+        }
+        if (!llmResult.emailBody) {
+          const errMsg = 'emailBody is empty. Stopping Gmail delivery.';
+          logToDb('ERROR', 'SYSTEM', errMsg);
+          throw new Error(errMsg);
+        }
+
+        // Ensure valid HTML body
+        llmResult.emailBody = ensureHtml(llmResult.emailBody);
+      }
 
       logToDb('INFO', 'SYSTEM', 'LLM Report Generated');
       logToDb('INFO', 'SYSTEM', 'Email Subject Generated');

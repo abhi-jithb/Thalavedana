@@ -203,14 +203,67 @@ export async function appendReportToExcel({
     const missingHeaders: string[] = [];
 
     const headerDefinitions = [
-      { key: 'sl_no', label: 'Sl No', match: (h: string) => ['sl no', 'sl. no', 'sl.no', 'slno', 'serial no', 'serial number'].includes(h) },
-      { key: 'date', label: 'Date', match: (h: string) => h === 'date' },
-      { key: 'report', label: 'Report', match: (h: string) => ['report', 'work report', 'work summary', 'summary'].includes(h) },
-      { key: 'login_time', label: 'Login Time', match: (h: string) => ['login time', 'login', 'login_time'].includes(h) },
-      { key: 'logoff_time', label: 'Logoff Time', match: (h: string) => ['logoff time', 'logoff', 'logoff_time', 'logout time', 'logout'].includes(h) },
-      { key: 'time_involved', label: 'Time Involved (Hours)', match: (h: string) => ['time involved (hours)', 'time involved', 'time', 'time_involved', 'time involved hours'].includes(h) },
-      { key: 'remarks', label: 'Remarks', match: (h: string) => ['remarks', 'remark'].includes(h) },
-      { key: 'meeting_details', label: 'Meeting Details', match: (h: string) => ['meeting details', 'meeting', 'meeting_details', 'meetings'].includes(h) }
+      { 
+        key: 'sl_no', 
+        label: 'Sl No', 
+        match: (h: string) => {
+          const s = h.toLowerCase().trim();
+          return s.includes('sl') || s.includes('serial') || s.includes('no') || s.includes('number');
+        } 
+      },
+      { 
+        key: 'date', 
+        label: 'Date', 
+        match: (h: string) => h.toLowerCase().trim().includes('date') 
+      },
+      { 
+        key: 'report', 
+        label: 'Report', 
+        match: (h: string) => {
+          const s = h.toLowerCase().trim();
+          return s.includes('report') || s.includes('summary') || s.includes('work') || s.includes('activity');
+        } 
+      },
+      { 
+        key: 'login_time', 
+        label: 'Login Time', 
+        match: (h: string) => {
+          const s = h.toLowerCase().trim();
+          return s.includes('login') || s.includes('in time') || s.includes('start');
+        } 
+      },
+      { 
+        key: 'logoff_time', 
+        label: 'Logoff Time', 
+        match: (h: string) => {
+          const s = h.toLowerCase().trim();
+          return s.includes('logoff') || s.includes('logout') || s.includes('out time') || s.includes('end');
+        } 
+      },
+      { 
+        key: 'time_involved', 
+        label: 'Time Involved (Hours)', 
+        match: (h: string) => {
+          const s = h.toLowerCase().trim();
+          return s.includes('time involved') || s.includes('hours') || s.includes('hr') || s.includes('duration') || s === 'time';
+        } 
+      },
+      { 
+        key: 'remarks', 
+        label: 'Remarks', 
+        match: (h: string) => {
+          const s = h.toLowerCase().trim();
+          return s.includes('remark') || s.includes('note');
+        } 
+      },
+      { 
+        key: 'meeting_details', 
+        label: 'Meeting Details', 
+        match: (h: string) => {
+          const s = h.toLowerCase().trim();
+          return s.includes('meeting') || s.includes('discussion') || s.includes('call');
+        } 
+      }
     ];
 
     for (const def of headerDefinitions) {

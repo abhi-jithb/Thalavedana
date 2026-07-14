@@ -58,11 +58,21 @@ const isStablePro = (name: string): boolean => {
          !lower.includes('00');
 };
 
+let cachedGeminiModels: string[] = [];
+
 // Dynamic discovery of Google Gemini models from Google API
 async function discoverGeminiModels(apiKey: string): Promise<string[]> {
+  if (cachedGeminiModels.length > 0) {
+    return cachedGeminiModels;
+  }
   try {
     const listUrl = `https://generativelanguage.googleapis.com/v1beta/models?key=${apiKey}`;
-    const listRes = await fetch(listUrl);
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 5000); // 5s timeout
+
+    const listRes = await fetch(listUrl, { signal: controller.signal });
+    clearTimeout(timeoutId);
+
     if (!listRes.ok) {
       console.error(`Failed to list Gemini models. Status: ${listRes.status}`);
       return [];
@@ -101,7 +111,8 @@ async function discoverGeminiModels(apiKey: string): Promise<string[]> {
       return name.startsWith('models/') ? name.substring(7) : name;
     }).filter(Boolean);
 
-    return Array.from(new Set(names));
+    cachedGeminiModels = Array.from(new Set(names));
+    return cachedGeminiModels;
   } catch (err: any) {
     console.error("Error discovering Gemini models:", err.message);
     return [];
