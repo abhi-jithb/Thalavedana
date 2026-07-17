@@ -47,3 +47,28 @@ getPipelineStatus: (dateStr: string) => Promise<PipelineStatus>
 onStatusChange: (callback: (status: PipelineStatus) => void) => () => void
 ```
 Returns an unsubscribe cleanup function. Pushes status updates during orchestrator execution.
+
+### 8. Settings Event Subscription
+```typescript
+onSettingsChange: (callback: (settings: SettingsData) => void) => () => void
+```
+Returns an unsubscribe cleanup function and pushes settings updates when values change.
+
+### 9. Retry and Approval Actions
+```typescript
+retryReportStage: (dateStr: string, stage: 'ai' | 'excel' | 'gmail') => Promise<{ ok: boolean; error?: string }>
+approveReport: (
+	dateStr: string,
+	reportContent: string,
+	emailSubject: string,
+	emailBody: string
+) => Promise<{ ok: boolean; error?: string }>
+cancelReport: (dateStr: string) => Promise<{ ok: boolean; error?: string }>
+```
+
+### 10. Export and Shell Utilities
+```typescript
+exportReportMarkdown: (dateStr: string, content: string) => Promise<{ ok: boolean; path?: string; error?: string }>
+openExternal: (url: string) => Promise<void>
+openPath: (pathStr: string) => Promise<void>
+```
