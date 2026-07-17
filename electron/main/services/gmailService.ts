@@ -260,19 +260,17 @@ export async function sendEmail({
   const gmail = google.gmail({ version: 'v1', auth: oauth2Client });
 
   // Compile MIME message
-  const mimeParts = [
+  const headers = [
     `To: ${to.join(', ')}`,
     cc && cc.length > 0 ? `Cc: ${cc.join(', ')}` : null,
     bcc && bcc.length > 0 ? `Bcc: ${bcc.join(', ')}` : null,
     `Subject: ${subject}`,
     `MIME-Version: 1.0`,
     `Content-Type: text/html; charset=utf-8`,
-    `Content-Transfer-Encoding: 7bit`,
-    '',
-    htmlBody,
+    `Content-Transfer-Encoding: 8bit`,
   ].filter(Boolean);
 
-  const mimeMessage = mimeParts.join('\r\n');
+  const mimeMessage = headers.join('\r\n') + '\r\n\r\n' + htmlBody;
 
   // Base64url encode the message
   const encodedMessage = Buffer.from(mimeMessage)

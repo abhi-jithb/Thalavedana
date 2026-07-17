@@ -1,8 +1,8 @@
 import { app, BrowserWindow, Tray, Menu, nativeImage } from 'electron';
 import { createMainWindow } from './createWindow';
 import { registerIpcHandlers } from './ipc/registerIpcHandlers';
-import { initDatabase, getSettings } from './database';
-import { startScheduler, startupRecovery } from './services/schedulerService';
+import { initDatabase, getSettings, pruneLogs } from './database';
+import { startScheduler } from './services/schedulerService';
 
 const singleInstanceLock = app.requestSingleInstanceLock();
 
@@ -74,7 +74,11 @@ app.whenReady().then(() => {
   });
 
   // Start scheduler services
-  startupRecovery().catch((err) => console.error('Startup recovery failed:', err));
+  try {
+    pruneLogs();
+  } catch (err: any) {
+    console.error('Failed to prune logs on startup:', err.message);
+  }
   startScheduler();
 
   app.on('activate', () => {

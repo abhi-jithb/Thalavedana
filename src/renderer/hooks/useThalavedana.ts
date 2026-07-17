@@ -73,6 +73,17 @@ export function useThalavedana() {
     return () => clearInterval(interval);
   }, [fetchLogs, fetchReports]);
 
+  // Listen to IPC settings updates
+  useEffect(() => {
+    if (window.thalavedana.onSettingsChange) {
+      const unsubscribe = window.thalavedana.onSettingsChange((updatedSettings) => {
+        setSettings(updatedSettings);
+      });
+      return unsubscribe;
+    }
+    return undefined;
+  }, []);
+
   // Save setting helper
   const saveSetting = async (key: keyof SettingsData, value: string) => {
     await window.thalavedana.saveSetting(key, value);

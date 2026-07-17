@@ -212,11 +212,13 @@ Strict Rules:
 8. Be professional, concise, and factual.
 9. The email MUST be a professional, neat HTML format, suitable to send to supervisors/managers.
 10. The emailSubject MUST be exactly "Daily Development Report - ${formattedDate}".
-11. The emailBody HTML MUST conclude with this exact signature:
+11. The emailBody HTML MUST NOT contain any title, header, or subject line repetition at the beginning (do NOT start with "Daily Development Report...").
+12. The emailBody HTML MUST start with the greeting "Dear Sir," (e.g. <p>Dear Sir,</p>).
+13. The emailBody HTML MUST conclude with this exact signature:
 <p>${signatureHtml}</p>
-12. The report MUST be a clear, professional Markdown format. The report title/header MUST be "Daily Development Report".
-13. Do NOT estimate, mention, or use Git commit timestamps to state working hours. The official work hours for this report are ${workStart} to ${workEnd}.
-14. Generate a concise one-line remark based on the day's work.
+14. The report MUST be a clear, professional Markdown format. The report title/header MUST be "Daily Development Report".
+15. Do NOT estimate, mention, or use Git commit timestamps to state working hours. The official work hours for this report are ${workStart} to ${workEnd}.
+16. Generate a concise one-line remark based on the day's work.
 
 You MUST respond ONLY with a raw JSON object containing these keys:
 {

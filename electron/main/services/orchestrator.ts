@@ -262,7 +262,7 @@ export class DailyReportOrchestrator {
 - Participated in discussions regarding upcoming feature implementation strategies.
 - Worked on local testing and code sanity checks.`,
           emailSubject: `Daily Development Report - ${formattedDate}`,
-          emailBody: `<p>Hi Team,</p>
+          emailBody: `<p>Dear Sir,</p>
 <p>Please find my daily report for today:</p>
 <ul>
   <li>Performed site testing and local verification of the build.</li>
