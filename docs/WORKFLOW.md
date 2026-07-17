@@ -54,3 +54,16 @@ sequenceDiagram
 - Generates an RFC 2822 compliant MIME email.
 - Uses OAuth2 to send the email directly via Google's `gmail.users.messages.send` API endpoint.
 - Persists refreshed tokens in the SQLite database automatically.
+
+## Runtime Status Model
+- The orchestrator emits live updates over IPC channel `orchestrator:status-change`.
+- Each stage (`git`, `ai`, `excel`, `gmail`) reports `idle`, `running`, `success`, or `failed`.
+- The top-level `overall` state transitions through `idle` -> `running` -> `success` or `failed`.
+- The renderer can fetch current state on demand using `orchestrator:get-status`.
+
+## Failure and Recovery Behavior
+- If no repositories are configured, the run fails immediately in stage 1.
+- If commits are empty and manual notes are also empty, the app generates a safe default fallback report.
+- If AI generation fails, Sheets and Gmail are skipped and the run is marked failed.
+- Partial failures are persisted in SQLite so they can be retried from the dashboard.
+- Manual stage retries are supported for report runs through targeted retry actions.
