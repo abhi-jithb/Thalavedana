@@ -2,6 +2,12 @@
 
 Follow this step-by-step guide to run, debug, compile, and build Thalavedana from scratch.
 
+## 0. Prerequisites
+- Node.js 20+
+- npm 10+
+- Git CLI available in `PATH`
+- Linux desktop keyring available (GNOME Keyring or KWallet) for `safeStorage` integration
+
 ## 1. Initial Project Scaffolding
 To create this application from the ground up, we set up `electron-vite` as the build system:
 
@@ -15,11 +21,8 @@ cd thalavedana
 Install the required application dependencies:
 
 ```bash
-# Install Google APIs and developer tools
-npm install googleapis @google/genai
-
-# Install developer tools and type packages
-npm install -D typescript @types/node @types/react @types/react-dom
+# Install all runtime and development dependencies from package-lock.json
+npm install
 ```
 
 ## 3. Running Locally in Development Mode
@@ -51,9 +54,14 @@ npm run build
 To bundle the app into a native installer:
 
 ```bash
-# Build app bundle
+# Build Electron main/preload and renderer bundles
 npm run build
 
-# Package using electron-builder (Fedoras/Linux target output in dist/)
+# Package using electron-builder (installer artifacts are generated in `dist/`)
 npx electron-builder
 ```
+
+## 7. Common Troubleshooting
+- If Gmail OAuth callback fails, verify the redirect URI is exactly `http://localhost:5999/oauth2callback`.
+- If repository scanning fails, verify each configured repository path is valid and accessible.
+- If app secrets fail to decrypt on Linux, ensure your desktop keyring service is running before launching the app.
