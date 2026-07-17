@@ -25,17 +25,19 @@ A privacy-first, local-only Electron desktop application that completely automat
 
 Deep dive into the architectural blueprints in the `docs/` folder:
 
-* 🏗️ **[docs/ARCHITECTURE.md](file:///home/abhijithb/Projects/Thalavedana/docs/ARCHITECTURE.md)**: Main, Preload, and Renderer multi-process boundaries.
-* 🔄 **[docs/WORKFLOW.md](file:///home/abhijithb/Projects/Thalavedana/docs/WORKFLOW.md)**: Sequential diagrams of the orchestration engine.
-* 🗄️ **[docs/DATABASE.md](file:///home/abhijithb/Projects/Thalavedana/docs/DATABASE.md)**: SQLite tables and keyring storage schema.
-* 🔌 **[docs/API.md](file:///home/abhijithb/Projects/Thalavedana/docs/API.md)**: Secure context bridge IPC channel documentation.
-* 🛠️ **[docs/DEVELOPMENT.md](file:///home/abhijithb/Projects/Thalavedana/docs/DEVELOPMENT.md)**: Step-by-step installation and manual execution guide.
-* 🔮 **[docs/ROADMAP.md](file:///home/abhijithb/Projects/Thalavedana/docs/ROADMAP.md)**: Windows compatibility and Ollama local model expansions.
-* 📜 **[docs/CHANGELOG.md](file:///home/abhijithb/Projects/Thalavedana/docs/CHANGELOG.md)**: Hardening features and release updates.
+* 🏗️ **[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)**: Main, preload, and renderer process boundaries.
+* 🔄 **[docs/WORKFLOW.md](docs/WORKFLOW.md)**: Orchestration pipeline stages and data handoff.
+* 🗄️ **[docs/DATABASE.md](docs/DATABASE.md)**: SQLite tables and keyring-backed secret handling.
+* 🔌 **[docs/API.md](docs/API.md)**: Secure context bridge IPC method reference.
+* 🛠️ **[docs/DEVELOPMENT.md](docs/DEVELOPMENT.md)**: Local setup, scripts, and build workflow.
+* 🔮 **[docs/ROADMAP.md](docs/ROADMAP.md)**: Planned milestones and long-term direction.
+* 📜 **[docs/CHANGELOG.md](docs/CHANGELOG.md)**: Release history and notable changes.
 
 ---
 
 ## 🚀 Quick Start Guide
+
+Prerequisites: Node.js 20+, npm 10+, and Git installed.
 
 ### 1. Install Project Dependencies
 ```bash
@@ -51,6 +53,11 @@ npm run dev
 ```bash
 npm run typecheck
 npm run build
+```
+
+### 4. Preview Built Renderer (Optional)
+```bash
+npm run preview
 ```
 
 ---
