@@ -9,6 +9,7 @@ const REDIRECT_URI = `http://localhost:${REDIRECT_PORT}/oauth2callback`;
 
 let oauthServer: http.Server | null = null;
 let oauthStateToken: string | null = null;
+let activeAuthReject: ((err: Error) => void) | null = null;
 
 // Singleton OAuth client instance
 let sharedOAuth2Client: any = null;
@@ -106,6 +107,12 @@ export async function getAuthenticatedClient(): Promise<any> {
     console.log("getAuthenticatedClient: Client verified. Access token exists:", !!accessTokenObj.token);
   } catch (err: any) {
     console.error("getAuthenticatedClient: Token refresh failed:", err.message);
+    if (err.message && err.message.includes('invalid_grant')) {
+      deleteSetting('gmailTokens');
+      deleteSetting('gmailUserEmail');
+      resetOAuth2Client();
+      logToDb('WARN', 'GMAIL', `OAuth invalid_grant detected. Cleared credentials.`);
+    }
     throw new Error(`Google authorization refresh failed: ${err.message}`);
   }
   return client;
@@ -113,14 +120,49 @@ export async function getAuthenticatedClient(): Promise<any> {
 
 // Start Gmail OAuth authorization process
 export function startGmailAuthFlow(): Promise<{ email: string; tokens: any }> {
-  return new Promise((resolve, reject) => {
-    try {
-      // Shut down previous server if running
-      if (oauthServer) {
-        oauthServer.close();
-        oauthServer = null;
-      }
+  if (activeAuthReject) {
+    activeAuthReject(new Error('Authentication cancelled by starting a new request.'));
+    activeAuthReject = null;
+  }
 
+  return new Promise((resolve, reject) => {
+    let isSettled = false;
+    activeAuthReject = reject;
+
+    const timeoutMinutes = 3;
+    let timeoutId: NodeJS.Timeout;
+
+    // Shut down previous server if running
+    if (oauthServer) {
+      try {
+        oauthServer.close();
+      } catch (e) {}
+      oauthServer = null;
+    }
+
+    const cleanUp = () => {
+      clearTimeout(timeoutId);
+      if (activeAuthReject === reject) {
+        activeAuthReject = null;
+      }
+      if (oauthServer) {
+        try {
+          oauthServer.close();
+        } catch (e) {}
+          oauthServer = null;
+      }
+    };
+
+    timeoutId = setTimeout(() => {
+      if (!isSettled) {
+        isSettled = true;
+        cleanUp();
+        logToDb('WARN', 'GMAIL', 'OAuth authorization timed out (no callback received).');
+        reject(new Error('OAuth authentication timed out. Please try again.'));
+      }
+    }, timeoutMinutes * 60 * 1000);
+
+    try {
       // Invalidate the old singleton client so we get a completely fresh setup
       resetOAuth2Client();
       const oauth2Client = getOAuth2Client();
@@ -147,10 +189,14 @@ export function startGmailAuthFlow(): Promise<{ email: string; tokens: any }> {
             const state = urlObj.searchParams.get('state');
             const code = urlObj.searchParams.get('code');
 
+            if (isSettled) return;
+
             // Validate CSRF state token
             if (!state || state !== oauthStateToken) {
               res.writeHead(400, { 'Content-Type': 'text/html' });
               res.end('<h1>Auth Error</h1><p>Security validation failed. Invalid state token (CSRF mismatch).</p>');
+              isSettled = true;
+              cleanUp();
               reject(new Error('Invalid state token returned (CSRF check failed)'));
               return;
             }
@@ -158,6 +204,8 @@ export function startGmailAuthFlow(): Promise<{ email: string; tokens: any }> {
             if (!code) {
               res.writeHead(400, { 'Content-Type': 'text/html' });
               res.end('<h1>Auth Error</h1><p>No code returned from Google.</p>');
+              isSettled = true;
+              cleanUp();
               reject(new Error('No authorization code returned'));
               return;
             }
@@ -192,15 +240,9 @@ export function startGmailAuthFlow(): Promise<{ email: string; tokens: any }> {
 
             logToDb('INFO', 'GMAIL', `Successfully authenticated Gmail account: ${email}`);
 
+            isSettled = true;
+            cleanUp();
             resolve({ email, tokens });
-            
-            // Clean up server
-            setTimeout(() => {
-              if (oauthServer) {
-                oauthServer.close();
-                oauthServer = null;
-              }
-            }, 1000);
           } else {
             res.writeHead(404);
             res.end('Not Found');
@@ -208,17 +250,25 @@ export function startGmailAuthFlow(): Promise<{ email: string; tokens: any }> {
         } catch (err: any) {
           res.writeHead(500, { 'Content-Type': 'text/html' });
           res.end(`<h1>Auth Failed</h1><p>${err.message}</p>`);
-          reject(err);
+          if (!isSettled) {
+            isSettled = true;
+            cleanUp();
+            reject(err);
+          }
         }
       });
 
       oauthServer.on('error', (err: any) => {
-        let errMsg = err.message;
-        if (err.code === 'EADDRINUSE') {
-          errMsg = `Port ${REDIRECT_PORT} is already in use. Please close the conflicting application and try again.`;
+        if (!isSettled) {
+          isSettled = true;
+          cleanUp();
+          let errMsg = err.message;
+          if (err.code === 'EADDRINUSE') {
+            errMsg = `Port ${REDIRECT_PORT} is already in use. Please close the conflicting application and try again.`;
+          }
+          logToDb('ERROR', 'GMAIL', `OAuth server error: ${errMsg}`);
+          reject(new Error(errMsg));
         }
-        logToDb('ERROR', 'GMAIL', `OAuth server error: ${errMsg}`);
-        reject(new Error(errMsg));
       });
 
       oauthServer.listen(REDIRECT_PORT, () => {
@@ -226,8 +276,12 @@ export function startGmailAuthFlow(): Promise<{ email: string; tokens: any }> {
         shell.openExternal(authUrl);
       });
     } catch (err: any) {
-      logToDb('ERROR', 'GMAIL', `Failed to start OAuth flow: ${err.message}`);
-      reject(err);
+      if (!isSettled) {
+        isSettled = true;
+        cleanUp();
+        logToDb('ERROR', 'GMAIL', `Failed to start OAuth flow: ${err.message}`);
+        reject(err);
+      }
     }
   });
 }
