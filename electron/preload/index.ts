@@ -14,6 +14,7 @@ const api: ThalavedanaApi = {
   getLogs: (limit) => ipcRenderer.invoke('logs:get', limit),
   clearLogs: () => ipcRenderer.invoke('logs:clear'),
   startGmailAuth: () => ipcRenderer.invoke('gmail:start-auth'),
+  stopGmailAuth: () => ipcRenderer.invoke('gmail:stop-auth'),
   inspectExcel: (filePath) => ipcRenderer.invoke('excel:inspect', filePath),
   
   getPipelineStatus: (dateStr) => ipcRenderer.invoke('orchestrator:get-status', dateStr),

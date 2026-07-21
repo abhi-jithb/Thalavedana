@@ -12,7 +12,7 @@ import {
 } from '../database';
 import { verifyGitRepo, getRepoStatusDetail } from '../services/gitService';
 import { runReportForDate, retryPendingReports } from '../services/schedulerService';
-import { startGmailAuthFlow } from '../services/gmailService';
+import { startGmailAuthFlow, cancelGmailAuthFlow } from '../services/gmailService';
 import { getExcelMeta } from '../services/excelService';
 import { DailyReportOrchestrator } from '../services/orchestrator';
 
@@ -159,6 +159,10 @@ export function registerIpcHandlers() {
       logToDb('ERROR', 'GMAIL', `OAuth process failed: ${err.message}`);
       throw err;
     }
+  });
+
+  ipcMain.handle('gmail:stop-auth', async () => {
+    cancelGmailAuthFlow();
   });
 
   // Excel file verification and mapping meta

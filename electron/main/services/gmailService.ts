@@ -286,6 +286,21 @@ export function startGmailAuthFlow(): Promise<{ email: string; tokens: any }> {
   });
 }
 
+// Cancel active Gmail OAuth authorization process
+export function cancelGmailAuthFlow() {
+  if (activeAuthReject) {
+    activeAuthReject(new Error('Authentication cancelled by user.'));
+    activeAuthReject = null;
+  }
+  if (oauthServer) {
+    try {
+      oauthServer.close();
+    } catch (e) {}
+    oauthServer = null;
+  }
+  logToDb('INFO', 'GMAIL', 'OAuth authorization cancelled by user.');
+}
+
 // Send Gmail MIME email
 export async function sendEmail({
   to,

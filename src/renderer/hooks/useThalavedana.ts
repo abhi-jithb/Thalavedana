@@ -136,6 +136,14 @@ export function useThalavedana() {
     return res;
   };
 
+  const cancelGmailAuth = async () => {
+    if (window.thalavedana.stopGmailAuth) {
+      await window.thalavedana.stopGmailAuth();
+    }
+    await fetchSettings();
+    await fetchLogs();
+  };
+
   return {
     settings,
     repos,
@@ -149,6 +157,7 @@ export function useThalavedana() {
     generateForDate,
     retryPending,
     connectGmail,
+    cancelGmailAuth,
     refreshAll,
   };
 }

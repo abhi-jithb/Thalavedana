@@ -5,6 +5,7 @@ interface SettingsProps {
   settings: SettingsData;
   saveSetting: (key: keyof SettingsData, value: string) => Promise<void>;
   connectGmail: () => Promise<{ email: string }>;
+  cancelGmailAuth: () => Promise<void>;
   refreshAll: () => Promise<void>;
   repos: RepositoryData[];
   addRepo: (path: string) => Promise<{ ok: boolean; name?: string; error?: string }>;
@@ -15,6 +16,7 @@ export default function Settings({
   settings,
   saveSetting,
   connectGmail,
+  cancelGmailAuth,
   repos,
   addRepo,
   removeRepo,
@@ -164,6 +166,16 @@ export default function Settings({
       showSuccessMessage('Gmail authenticated successfully.');
     } catch (err: any) {
       setGmailError(err.message || 'OAuth authentication failed.');
+    } finally {
+      setGmailLoading(false);
+    }
+  };
+
+  const handleCancelGmailAuth = async () => {
+    try {
+      await cancelGmailAuth();
+    } catch (err: any) {
+      // ignore
     } finally {
       setGmailLoading(false);
     }
@@ -617,6 +629,11 @@ export default function Settings({
                 <button className="btn btn--secondary" onClick={handleConnectGmail} disabled={gmailLoading}>
                   {gmailLoading ? 'Authorizing...' : settings.gmailUserEmail ? 'Re-authorize' : 'Authorize Account'}
                 </button>
+                {gmailLoading && (
+                  <button className="btn btn--danger" onClick={handleCancelGmailAuth}>
+                    Cancel
+                  </button>
+                )}
               </div>
             </div>
 

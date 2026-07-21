@@ -8,6 +8,7 @@ interface SetupWizardProps {
   addRepo: (path: string) => Promise<{ ok: boolean; name?: string; error?: string }>;
   removeRepo: (id: number) => Promise<void>;
   connectGmail: () => Promise<{ email: string }>;
+  cancelGmailAuth: () => Promise<void>;
   refreshAll: () => Promise<void>;
 }
 
@@ -18,6 +19,7 @@ export default function SetupWizard({
   addRepo,
   removeRepo,
   connectGmail,
+  cancelGmailAuth,
   refreshAll,
 }: SetupWizardProps) {
   const [currentStep, setCurrentStep] = useState(1);
@@ -115,6 +117,16 @@ export default function SetupWizard({
       await connectGmail();
     } catch (err: any) {
       setGmailError(err.message || 'OAuth authentication failed.');
+    } finally {
+      setGmailLoading(false);
+    }
+  };
+
+  const handleCancelGmailAuth = async () => {
+    try {
+      await cancelGmailAuth();
+    } catch (err: any) {
+      // ignore
     } finally {
       setGmailLoading(false);
     }
@@ -395,18 +407,35 @@ export default function SetupWizard({
               {settings.gmailUserEmail ? (
                 <div className="success-banner" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%', gap: '10px' }}>
                   <span>Connected Gmail: <strong>{settings.gmailUserEmail}</strong></span>
-                  <button className="btn btn--secondary btn--sm" onClick={handleConnectGmail} disabled={gmailLoading}>
-                    {gmailLoading ? 'Re-connecting...' : 'Re-connect'}
-                  </button>
+                  <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                    <button className="btn btn--secondary btn--sm" onClick={handleConnectGmail} disabled={gmailLoading}>
+                      {gmailLoading ? 'Re-connecting...' : 'Re-connect'}
+                    </button>
+                    {gmailLoading && (
+                      <button className="btn btn--danger btn--sm" onClick={handleCancelGmailAuth}>
+                        Cancel
+                      </button>
+                    )}
+                  </div>
                 </div>
               ) : (
-                <button 
-                  className="btn btn--secondary" 
-                  onClick={handleConnectGmail} 
-                  disabled={gmailLoading}
-                >
-                  {gmailLoading ? 'Waiting for redirection...' : 'Authenticate Google Account'}
-                </button>
+                <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                  <button 
+                    className="btn btn--secondary" 
+                    onClick={handleConnectGmail} 
+                    disabled={gmailLoading}
+                  >
+                    {gmailLoading ? 'Waiting for redirection...' : 'Authenticate Google Account'}
+                  </button>
+                  {gmailLoading && (
+                    <button 
+                      className="btn btn--danger" 
+                      onClick={handleCancelGmailAuth}
+                    >
+                      Cancel
+                    </button>
+                  )}
+                </div>
               )}
             </div>
 

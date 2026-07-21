@@ -21,6 +21,7 @@ export default function App() {
     generateForDate,
     retryPending,
     connectGmail,
+    cancelGmailAuth,
     refreshAll,
   } = useThalavedana();
 
@@ -64,6 +65,7 @@ export default function App() {
               addRepo={addRepo}
               removeRepo={removeRepo}
               connectGmail={connectGmail}
+              cancelGmailAuth={cancelGmailAuth}
               refreshAll={refreshAll}
             />
           </div>
@@ -287,6 +289,7 @@ export default function App() {
             settings={settings}
             saveSetting={saveSetting}
             connectGmail={connectGmail}
+            cancelGmailAuth={cancelGmailAuth}
             refreshAll={refreshAll}
             repos={repos}
             addRepo={addRepo}
